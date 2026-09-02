@@ -6,6 +6,7 @@ import { chromium, type BrowserContext, type Page } from "playwright";
 import { CONFIG } from "../config.js";
 import { CHROME_UA } from "../ashby/client.js";
 import { NAME_SHIM, errMsg } from "../util.js";
+import { openUserBrowser, readSessionFromBrowser } from "./chrome.js";
 
 /**
  * Signed-in state for experts.afterquery.com.
@@ -42,7 +43,7 @@ export interface AuthStatus {
   /** True when a profile directory exists, whether or not it is still valid. */
   hasProfile: boolean;
   /** Where the answer came from, so the UI can explain itself. */
-  via: "your-browser" | "agent-profile" | null;
+  via: "my-chrome" | "your-browser" | "agent-profile" | null;
   /** Why we are not signed in, when we are not. */
   reason: "ok" | "never-signed-in" | "signed-out" | "error";
   checkedAt: string;
@@ -137,7 +138,10 @@ async function readAuth(
   // rewrites `const f = () => {}` into `__name(() => {}, "f")`, and that helper
   // does not exist inside the page - see NAME_SHIM in util.ts. Keeping this
   // body free of named inner functions means it works even in a browser we do
-  // not control (a CDP-attached Chrome, where we do not install the shim).
+  // not control (a CDP-attached Chrome, where we do not install the shim). We
+  // still bootstrap the shim first (as a raw string, immune to the transform)
+  // so this is robust even if the body grows a named const later.
+  await page.evaluate(NAME_SHIM);
   return page.evaluate(async () => {
     const rec = await new Promise<Record<string, unknown> | null>((resolve) => {
       let settled = false;
@@ -264,7 +268,41 @@ export async function authStatus(force = false): Promise<AuthStatus> {
     checkedAt: new Date().toISOString(),
   };
 
-  // 1. A browser the user is already signed into.
+  // 0. "Use my Chrome": launch the user's own Chrome profile and read the live
+  //    session over CDP. This is the route that reuses an existing Google login.
+  if (CONFIG.experts.useMyChrome || CONFIG.experts.chromeCdpUrl) {
+    let handle: Awaited<ReturnType<typeof openUserBrowser>> | null = null;
+    try {
+      handle = await openUserBrowser();
+      const { email, displayName, token } = await readSessionFromBrowser(handle.browser);
+      const status: AuthStatus = {
+        ...base,
+        via: "my-chrome",
+        signedIn: Boolean(email),
+        email: email ?? null,
+        displayName: displayName ?? null,
+        reason: email ? "ok" : "signed-out",
+        detail: email
+          ? "read live from your own Chrome"
+          : "opened your Chrome, but that profile is not signed in to AfterQuery Experts",
+      };
+      cached = { status, token, at: Date.now() };
+      return status;
+    } catch (err) {
+      const status: AuthStatus = {
+        ...base,
+        via: "my-chrome",
+        reason: "error",
+        detail: errMsg(err),
+      };
+      cached = { status, token: null, at: Date.now() };
+      return status;
+    } finally {
+      await handle?.release();
+    }
+  }
+
+  // 1. A browser the user is already signed into (legacy manual CDP path).
   const attached = await connectUserBrowser();
   if (attached) {
     try {

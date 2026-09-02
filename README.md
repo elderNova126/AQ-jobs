@@ -50,18 +50,30 @@ listing otherwise.
 ### Why the app can't see the login in your own browser
 
 If you are signed in to AfterQuery in Chrome and then open `localhost:5173`, the
-agent will still say **not signed in**. That is correct, not a bug: a page served
-from `localhost` is not allowed to read `experts.afterquery.com`'s cookies or
-IndexedDB. Same-origin policy, no way around it. The agent needs a browser
-session *it* can read, which means one of two routes:
+agent still says **not signed in**. That is correct, not a bug, and it's worth
+understanding why because it drives the whole design:
+
+- A page served from `localhost` **cannot** read `experts.afterquery.com`'s
+  cookies or IndexedDB — that's the browser's same-origin policy.
+- The session *is* on disk (`…/User Data/<profile>/IndexedDB/https_experts.afterquery.com_…`),
+  but Chrome stores it as **snappy-compressed LevelDB** and holds the file open
+  while running, so reading it off disk is unreliable — and copying the whole
+  profile to get at it is exactly the pattern security tooling (rightly) flags as
+  credential theft. This agent doesn't do that.
+
+The clean way to reuse your existing login is to read it **through a browser
+engine over CDP**. So there are three routes, all exposed as buttons in the UI:
 
 | Route | Setup | Trade-off |
 |---|---|---|
-| **Agent's own profile** (default) | Click `Sign in`; a real Chrome window opens for a one-time Google sign-in | One extra sign-in, then remembered forever |
-| **Attach to your Chrome** | Start Chrome with `--remote-debugging-port=9222`, set `AQ_CHROME_CDP=http://localhost:9222` | Uses the session you already have; needs Chrome started with that flag |
+| **Use my Chrome** | Fully quit Chrome, click `Use my Chrome login` | Reuses your existing Google login; the agent reopens your real profile with a debug port and reads the live session (nothing copied). Must quit Chrome first — the debug port only opens at startup |
+| **Attach to your Chrome** | Start Chrome yourself with `--remote-debugging-port=9222`, set `AQ_CHROME_CDP=http://localhost:9222` | Same idea, but you control the launch |
+| **Sign in separately** (default) | Click `Sign in`; a real Chrome window opens for a one-time Google sign-in | One extra sign-in, then remembered forever in the agent's own profile |
 
-Either way all ~173 Experts roles are public, so nothing is blocked by being
-signed out — signing in only lets the agent fetch the listing *as you*.
+The app detects your Chrome profiles and shows which one holds an AfterQuery
+login, so `Use my Chrome login` targets the right profile automatically. Either
+way all ~173 Experts roles are public, so nothing is blocked by being signed
+out — signing in only lets the agent fetch the listing *as you*.
 
 ### How sign-in works, and why it works that way
 
@@ -267,8 +279,12 @@ All optional except the API key — see [`.env.example`](.env.example).
 | `AQ_APPLY_CONCURRENCY` | `2` | Parallel browser workers in a bulk run |
 | `AQ_HEADFUL` | `0` | `1` = show the Chrome window while applying |
 | `AQ_EXPERTS` | `1` | `0` skips the Experts board entirely |
-| `AQ_BROWSER_CHANNEL` | auto | Browser for the sign-in window: `chrome`, `msedge`, or blank to auto-detect |
-| `AQ_CHROME_CDP` | — | Attach to a Chrome you are already signed into, e.g. `http://localhost:9222` |
+| `AQ_USE_MY_CHROME` | `0` | `1` reads your login from your own Chrome profile (also a UI button) |
+| `AQ_CHROME_PROFILE` | auto | Which Chrome profile holds your login, e.g. `Default`, `Profile 1` |
+| `AQ_CHROME_PATH` / `AQ_CHROME_USER_DATA_DIR` | auto | Overrides if Chrome is in a non-standard location |
+| `AQ_CDP_PORT` | `9222` | Debug port the agent opens on your Chrome |
+| `AQ_CHROME_CDP` | — | Attach to a Chrome you started yourself with `--remote-debugging-port` |
+| `AQ_BROWSER_CHANNEL` | auto | Browser for the separate-sign-in window: `chrome`, `msedge`, or blank |
 | `AQ_SIGNIN_TIMEOUT_MS` | `300000` | How long the sign-in window waits for you |
 | `PORT` | `5173` | HTTP port |
 
@@ -289,7 +305,8 @@ src/
     client.ts          board API, GraphQL transport, resume upload
   experts/
     client.ts          Experts listings -> Job, with optional bearer token
-    session.ts         persistent-profile Google sign-in + Firebase ID token
+    session.ts         auth status across all three routes + Firebase ID token
+    chrome.ts          "Use my Chrome": profile discovery, launch, CDP read
   resume/
     extract.ts         PDF/DOCX/TXT -> text, identity scraping
     profile.ts         resume -> structured profile
@@ -300,7 +317,7 @@ src/
 public/                single-page UI (no build step)
 tools/
   extract-ashby-ops.ts regenerate gql-ops.ts from the live bundle
-  selftest.ts          36 checks incl. live contracts for both boards
+  selftest.ts          38 checks incl. the __name-shim + discovery guards
 ```
 
 ### A note on in-page code

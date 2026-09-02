@@ -16,6 +16,9 @@ import { missingIdentityFields } from "../src/apply/engine.js";
 import { guessIdentity, extractResumeText } from "../src/resume/extract.js";
 import { fetchBoard, openApplicationForm, visibleFieldEntries } from "../src/ashby/client.js";
 import { fetchExpertsBoard } from "../src/experts/client.js";
+import { NAME_SHIM } from "../src/util.js";
+import { describeUserChrome } from "../src/experts/chrome.js";
+import { chromium } from "playwright";
 import { htmlToText, mapLimit, verdictOf } from "../src/util.js";
 import type { AshbyFieldDef, Resume } from "../src/types.js";
 
@@ -251,6 +254,41 @@ async function main(): Promise<void> {
     assert.equal(verdictOf(70), "good");
     assert.equal(verdictOf(50), "moderate");
     assert.equal(verdictOf(20), "weak");
+  });
+
+  console.log("\n== in-page code survives the esbuild __name transform ==");
+
+  await test("named inner const in page.evaluate works after the shim (regression)", async () => {
+    // The exact bug that made Experts sign-in always read "signed out": esbuild
+    // rewrites `const f = () => {}` to `__name(() => {}, "f")`, undefined in the
+    // page. The shim (evaluated as a raw string) must fix it.
+    const b = await chromium.launch();
+    const page = await b.newPage();
+    await page.goto("data:text/html,<h1>x</h1>");
+    await page.evaluate(NAME_SHIM);
+    const ok = await page.evaluate(async () => {
+      const helper = (n: number): number => n + 1;
+      return helper(41);
+    });
+    await b.close();
+    assert.equal(ok, 42, "named inner const failed even after the shim");
+  });
+
+  console.log("\n== Chrome profile discovery (read-only) ==");
+
+  await test("describeUserChrome returns a well-formed shape", () => {
+    const info = describeUserChrome();
+    assert.equal(typeof info.available, "boolean");
+    assert.ok(Array.isArray(info.profiles));
+    for (const p of info.profiles) {
+      assert.equal(typeof p.dir, "string");
+      assert.equal(typeof p.hasExpertsLogin, "boolean");
+    }
+    const withLogin = info.profiles.filter((p) => p.hasExpertsLogin).length;
+    console.log(
+      `       (chrome ${info.available ? "found" : "not found"}, ` +
+        `${info.profiles.length} profiles, ${withLogin} with an AfterQuery login)`,
+    );
   });
 
   console.log("\n== live contract against AfterQuery's board ==");

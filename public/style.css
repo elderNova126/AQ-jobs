@@ -439,3 +439,6 @@ table.kv td { word-break: break-word; }
   padding: 1px 4px; border-radius: 4px;
   background: var(--bg); border: 1px solid var(--border-soft);
 }
+
+.authbtns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.authbtns .btn { flex: 1 1 auto; }

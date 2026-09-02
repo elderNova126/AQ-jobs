@@ -24,7 +24,7 @@ const state = {
   filters: { q: "", dept: "", source: "", sort: "score" },
   auth: { signedIn: false, email: null, hasProfile: false, detail: "" },
   counts: { ashby: 0, experts: 0 },
-  cdpHint: true,
+  chrome: { available: false, profiles: [], chosen: null },
   signingIn: false,
   scoring: null,
   applyRun: null,
@@ -108,7 +108,7 @@ async function loadState() {
   state.applications = s.applications;
   state.jobsSyncedAt = s.jobsSyncedAt;
   state.auth = s.auth ?? state.auth;
-  state.cdpHint = s.cdpHint ?? state.cdpHint;
+  state.chrome = s.chrome ?? state.chrome;
   state.counts = s.counts ?? state.counts;
   state.llmDetail = s.llmDetail ?? "";
 
@@ -188,24 +188,69 @@ function renderAuth() {
   pill.className = "pill pill-off";
   pill.title = a.detail ?? "";
   btn.textContent = "Sign in";
+  renderAuthCard();
+}
 
-  // The single most confusing state in this app: the user is signed in *in
-  // their own browser* and reasonably expects that to count. It cannot - a page
-  // on localhost is not allowed to read another origin's session - so say so
-  // plainly instead of leaving "not signed in" looking like a bug.
-  if (note) {
+/**
+ * The sidebar card. The confusing part - "I'm logged in in my own browser, why
+ * doesn't it show?" - is answered here with two concrete buttons rather than a
+ * wall of text: use that Chrome login, or sign in separately.
+ */
+function renderAuthCard() {
+  const a = state.auth;
+  const chip = $("authChip");
+  const note = $("authNote");
+  const btns = $("authBtns");
+  const detail = $("chromeDetail");
+  const useBtn = $("useChromeBtn");
+
+  if (a.signedIn) {
+    const via =
+      a.via === "my-chrome" ? "your Chrome"
+      : a.via === "your-browser" ? "your attached Chrome"
+      : "the agent's own profile";
+    chip.textContent = "signed in";
+    chip.className = "chip chip-ok";
     note.hidden = false;
-    note.innerHTML =
-      `<strong>Signed in to AfterQuery in your own browser?</strong> That login is invisible here — ` +
-      `a page served from <code>localhost</code> is not allowed to read ` +
-      `<code>experts.afterquery.com</code>'s session (same-origin policy). ` +
-      `Click <strong>Sign in</strong> and the agent opens its own Chrome window for a one-time Google sign-in, ` +
-      `which it then remembers. ` +
-      (state.cdpHint
-        ? `Or attach it to the Chrome you already use: start Chrome with ` +
-          `<code>--remote-debugging-port=9222</code> and set <code>AQ_CHROME_CDP=http://localhost:9222</code>.`
-        : ``) +
-      `<br />All ${state.counts.experts} Experts roles are public either way — signing in only lets the agent fetch them as you.`;
+    note.innerHTML = `Signed in as <strong>${esc(a.email ?? "")}</strong>, via ${esc(via)}. ` +
+      `Fetching the ${state.counts.experts} Experts roles as you.`;
+    btns.hidden = true;
+    detail.hidden = true;
+    return;
+  }
+
+  chip.textContent = "not signed in";
+  chip.className = "chip chip-bad";
+
+  note.hidden = false;
+  note.innerHTML =
+    `Being logged in to AfterQuery in your normal Chrome doesn't show here on its own — ` +
+    `a page on <code>localhost</code> can't read another site's session (same-origin policy). ` +
+    `Two ways to fix it:`;
+
+  btns.hidden = false;
+  const ch = state.chrome || {};
+  if (ch.available && (ch.chosen || (ch.profiles || []).some((p) => p.hasExpertsLogin))) {
+    const chosen = ch.chosen || (ch.profiles || []).find((p) => p.hasExpertsLogin);
+    useBtn.disabled = false;
+    useBtn.textContent = "Use my Chrome login";
+    detail.hidden = false;
+    detail.innerHTML =
+      `<strong>Use my Chrome login</strong> reopens your <em>${esc(chosen?.name || chosen?.dir || "Chrome")}</em> profile ` +
+      `(all logins intact) and reads the session live — nothing is copied. ` +
+      `<strong>Fully quit Chrome first</strong>, then click, because Chrome only opens its debug port at startup.`;
+  } else {
+    useBtn.disabled = true;
+    useBtn.textContent = "Use my Chrome (not found)";
+    detail.hidden = false;
+    detail.textContent = ch.reason
+      ? `Can't use your Chrome automatically: ${ch.reason}. Use "Sign in separately" instead.`
+      : `No AfterQuery login found in your Chrome profiles yet. Use "Sign in separately".`;
+  }
+
+  // If a my-chrome attempt just failed (e.g. Chrome still open), show why.
+  if (a.via === "my-chrome" && a.reason === "error" && a.detail) {
+    note.innerHTML += `<br /><span class="err">${esc(a.detail)}</span>`;
   }
 }
 
@@ -835,6 +880,37 @@ function wire() {
       renderAuth();
     }
   });
+
+  const runUseChrome = async () => {
+    const chosen = (state.chrome?.chosen) || (state.chrome?.profiles || []).find((p) => p.hasExpertsLogin);
+    state.signingIn = true;
+    renderAuth();
+    toast("Reopening your Chrome to read the AfterQuery login…", "ok");
+    log("use-my-chrome: launching your Chrome profile…");
+    try {
+      const st = await api("/api/auth/use-my-chrome", {
+        method: "POST",
+        body: JSON.stringify({ profile: chosen?.dir }),
+      });
+      state.signingIn = false;
+      if (st.signedIn) {
+        log(`read login from your Chrome: ${st.email}`, "ok");
+        toast(`Signed in as ${st.email} (via your Chrome)`, "ok");
+      } else {
+        log(st.detail || "could not read a login from your Chrome", "warn");
+        toast(st.detail || "No login found in your Chrome", "err");
+      }
+      await loadState();
+    } catch (err) {
+      state.signingIn = false;
+      toast(err.message, "err");
+      log(`use-my-chrome failed: ${err.message}`, "err");
+      renderAuth();
+    }
+  };
+
+  $("useChromeBtn").addEventListener("click", runUseChrome);
+  $("agentSignInBtn").addEventListener("click", () => $("authBtn").click());
 
   $("sourceFilter").addEventListener("change", (e) => {
     state.filters.source = e.target.value;

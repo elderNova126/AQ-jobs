@@ -75,17 +75,31 @@ export const CONFIG = {
      */
     browserChannel: process.env.AQ_BROWSER_CHANNEL ?? "",
     /**
-     * Optional: attach to a Chrome you are already signed into, instead of the
-     * agent keeping its own profile.
-     *
-     * A page served from localhost can never read experts.afterquery.com's
-     * Firebase session - that is the same-origin policy, not something we can
-     * work around - so by default the agent signs in once in its own profile.
-     * If you would rather it used the browser you already use, start Chrome with
+     * Attach to a Chrome you already started with a debug port, e.g.
      *     chrome --remote-debugging-port=9222
-     * and set AQ_CHROME_CDP=http://localhost:9222.
+     * then AQ_CHROME_CDP=http://localhost:9222. Advanced/manual route.
      */
     chromeCdpUrl: process.env.AQ_CHROME_CDP ?? "",
+    /**
+     * "Use my Chrome": read the login from your OWN Chrome profile.
+     *
+     * A page on localhost cannot read experts.afterquery.com's session (same
+     * origin policy), and the on-disk session is snappy-compressed LevelDB that
+     * only decodes through a browser engine. So the only clean way to reuse your
+     * existing Google login is to let the agent LAUNCH your real Chrome profile
+     * with a debug port and read the live session over CDP - no file copying,
+     * always a fresh token. Requires that profile's Chrome to be closed first,
+     * because Chrome only opens the debug port at startup.
+     */
+    useMyChrome: process.env.AQ_USE_MY_CHROME === "1",
+    /** Which Chrome profile holds your AfterQuery login (e.g. "Default", "Profile 1"). */
+    chromeProfile: process.env.AQ_CHROME_PROFILE ?? "",
+    /** Path to chrome.exe / chrome; blank auto-detects. */
+    chromePath: process.env.AQ_CHROME_PATH ?? "",
+    /** Override the Chrome "User Data" root; blank auto-detects the OS default. */
+    userDataDir: process.env.AQ_CHROME_USER_DATA_DIR ?? "",
+    /** Debug port the agent opens on your Chrome. */
+    cdpPort: num(process.env.AQ_CDP_PORT, 9222),
     /** How long the interactive sign-in window waits for the user. */
     signInTimeoutMs: num(process.env.AQ_SIGNIN_TIMEOUT_MS, 5 * 60 * 1000),
     /** 0 disables pulling the Experts board entirely. */
@@ -135,7 +149,7 @@ export const CONFIG = {
      */
     dryRun: process.env.AQ_DRY_RUN === "1",
   },
-} as const;
+};
 
 export function ensureDirs(): void {
   fs.mkdirSync(CONFIG.uploadsDir, { recursive: true });

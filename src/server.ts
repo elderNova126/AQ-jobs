@@ -11,6 +11,7 @@ import {
   signInInteractive,
   signOut,
 } from "./experts/session.js";
+import { describeUserChrome } from "./experts/chrome.js";
 import { closeBrowser } from "./apply/browser.js";
 import { applyToMany, isReadyToApply, missingIdentityFields } from "./apply/engine.js";
 import { llmReady, llmStatus } from "./llm.js";
@@ -132,6 +133,35 @@ app.get("/api/auth/status", async (req, res) => {
   res.json(await authStatus(req.query.refresh === "1"));
 });
 
+/** What "Use my Chrome" would target: which profiles exist and which are logged in. */
+app.get("/api/auth/chrome-info", (_req, res) => {
+  res.json(describeUserChrome());
+});
+
+/**
+ * Turn on "use my Chrome" for this session and read the login from it. This
+ * launches the user's real Chrome profile with a debug port (see chrome.ts) and
+ * reads the live session over CDP - no file copying, always a fresh token.
+ */
+app.post("/api/auth/use-my-chrome", async (req, res) => {
+  const body = req.body as { profile?: string };
+  if (typeof body.profile === "string" && body.profile) {
+    CONFIG.experts.chromeProfile = body.profile;
+  }
+  CONFIG.experts.useMyChrome = true;
+  emit({ kind: "auth-step", step: "opening your Chrome to read the AfterQuery login…" });
+  const status = await authStatus(true);
+  emit({ kind: "auth-done", status });
+  if (status.signedIn) {
+    try {
+      await syncJobs();
+    } catch (err) {
+      console.warn(`[auth] post-attach sync failed: ${errMsg(err)}`);
+    }
+  }
+  res.json(status);
+});
+
 /** Only one sign-in window at a time. */
 let signingIn = false;
 
@@ -192,8 +222,8 @@ app.get("/api/state", async (_req, res) => {
     llmReady: llm.ok,
     llmDetail: llm.detail,
     auth,
-    /** Whether to suggest the attach-to-your-Chrome route in the UI. */
-    cdpHint: CONFIG.experts.chromeCdpUrl === "",
+    /** What the "Use my Chrome" button can target. */
+    chrome: describeUserChrome(),
     counts: {
       ashby: jobs.filter((j) => j.source === "ashby").length,
       experts: jobs.filter((j) => j.source === "experts").length,
