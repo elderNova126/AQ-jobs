@@ -394,38 +394,33 @@ function renderJobs() {
       statusCell = `<span class="status st-idle">—</span>`;
     }
 
-    // Both boards get Apply + Open.
-    //  - Ashby: Apply is the agent's automated submission; Open ↗ is the posting.
-    //  - Experts: applications are login-gated on their own site and submitting
-    //    is irreversible, so Apply opens the application form (signed in) for you
-    //    to submit; Open ↗ is the job description.
+    // Both boards get an automated Apply + an Open ↗ link.
+    //  - Ashby: Apply submits via the browser (reCAPTCHA); Open ↗ is the posting.
+    //  - Experts: Apply submits via REST as the signed-in user; Open ↗ is the
+    //    job description. Experts additionally needs an Experts sign-in.
     const isExperts = job.source === "experts";
     const badge = `<span class="srcbadge srcbadge-${job.source}">${isExperts ? "experts" : "ashby"}</span>`;
 
     let actionCell;
-    if (isExperts) {
-      const applied = app?.status === "submitted";
-      actionCell = `
-        <div class="rowbtns">
-          <a class="btn btn-apply" data-open-apply href="${esc(job.applyUrl)}" target="_blank" rel="noopener"
-             title="Open this role's application on AfterQuery Experts (sign in there to submit)">${applied ? "Applied ↗" : "Apply ↗"}</a>
-          <a class="btn btn-open" href="${esc(job.jobUrl)}" target="_blank" rel="noopener"
-             title="Open the job description on AfterQuery Experts">Open ↗</a>
-        </div>`;
-    } else {
-      const canApply = Boolean(r?.ready) && !runningStep && !state.applyRun;
+    {
+      const needsAuth = isExperts && !state.auth.signedIn;
+      const openHref = job.jobUrl;
+      const canApply = Boolean(r?.ready) && !needsAuth && !runningStep && !state.applyRun;
       const applyLabel = app?.status === "submitted" ? "Re-apply" : "Apply";
       const applyTitle = !r
         ? "Select a resume first"
         : !r.ready
           ? `Fill in: ${r.missing.join(", ")}`
-          : app?.status === "submitted"
-            ? "Already submitted - click to submit again"
-            : `Apply to ${job.title}`;
+          : needsAuth
+            ? "Sign in to AfterQuery Experts first (sidebar)"
+            : app?.status === "submitted"
+              ? "Already submitted - click to submit again"
+              : `Apply to ${job.title}`;
       actionCell = `
         <div class="rowbtns">
           <button class="btn btn-apply" data-apply ${canApply ? "" : "disabled"} title="${esc(applyTitle)}">${applyLabel}</button>
-          <a class="btn btn-open" href="${esc(job.jobUrl)}" target="_blank" rel="noopener" title="Open the posting on Ashby">Open ↗</a>
+          <a class="btn btn-open" href="${esc(openHref)}" target="_blank" rel="noopener"
+             title="${isExperts ? "Open the job description on AfterQuery Experts" : "Open the posting on Ashby"}">Open ↗</a>
         </div>`;
     }
 
@@ -442,10 +437,6 @@ function renderJobs() {
 
     tr.querySelector("[data-detail]").addEventListener("click", () => openDrawer(job, s, app));
     tr.querySelector("[data-apply]")?.addEventListener("click", () => applyOne(job));
-    tr.querySelector("[data-open-apply]")?.addEventListener("click", () => {
-      log(`opened Experts application: ${job.title}`);
-      toast("Opened the application on AfterQuery Experts — sign in there and submit.", "ok");
-    });
     tbody.append(tr);
   }
 }
@@ -463,8 +454,8 @@ function renderBulk() {
   const skip = $("skipApplied").checked;
 
   const eligible = state.jobs.filter((j) => {
-    // Only Ashby roles can be submitted automatically.
-    if (j.source !== "ashby") return false;
+    // Ashby always; Experts too, but only when signed in to Experts.
+    if (j.source === "experts" && !state.auth.signedIn) return false;
     const s = scores.get(j.id);
     if (!s || s.score < min) return false;
     if (skip && r && latestApp(r.id, j.id)?.status === "submitted") return false;
@@ -474,21 +465,20 @@ function renderBulk() {
   const btn = $("bulkApplyBtn");
   const busy = Boolean(state.applyRun);
   btn.disabled = !r?.ready || eligible.length === 0 || busy;
-  // Bulk apply is Ashby-only, so say so - otherwise "No jobs >= 70" reads as a
-  // bug when the user can plainly see Experts roles above the threshold.
   btn.textContent = busy
     ? "Applying…"
     : eligible.length
       ? `Apply to ${eligible.length} job${eligible.length === 1 ? "" : "s"} (≥ ${min})`
-      : `No Ashby jobs ≥ ${min}`;
+      : `No jobs ≥ ${min}`;
   btn.title = !r
     ? "Select a resume first"
     : !r.ready
       ? `Fill in: ${r.missing.join(", ")}`
       : eligible.length
         ? `${eligible.map((j) => j.title).join(", ")}`
-        : "Automated apply covers the Ashby board only. Lower the minimum score, " +
-          "or open Experts roles individually.";
+        : !state.auth.signedIn
+          ? "Lower the minimum score, or sign in to Experts to include those roles."
+          : "Lower the minimum score, or score this resume first.";
 
   return eligible;
 }

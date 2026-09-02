@@ -503,8 +503,12 @@ app.post("/api/apply", async (req, res) => {
   }
 
   // Selection: either explicit job ids, or every job at/above a score
-  // threshold. Only Ashby roles can be submitted automatically.
-  let jobs = store.listJobs().filter((j) => j.source === "ashby");
+  // threshold. Ashby always submits automatically; Experts roles submit as the
+  // signed-in user, so include them only when a session exists.
+  const expertsReady = (await authStatus()).signedIn;
+  let jobs = store
+    .listJobs()
+    .filter((j) => j.source === "ashby" || (j.source === "experts" && expertsReady));
   if (Array.isArray(body.jobIds) && body.jobIds.length > 0) {
     const want = new Set(body.jobIds);
     jobs = jobs.filter((j) => want.has(j.id));

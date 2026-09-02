@@ -50,15 +50,27 @@ const state: State = {
 };
 
 /** Decode a JWT payload (no verification) to read exp/email. */
-export function decodeJwt(token: string): { exp?: number; email?: string } {
+export function decodeJwt(
+  token: string,
+): { exp?: number; email?: string; user_id?: string; sub?: string } {
   try {
     const part = token.split(".")[1];
     if (!part) return {};
     const json = Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
       "utf8",
     );
-    const o = JSON.parse(json) as { exp?: number; email?: string };
-    return { exp: typeof o.exp === "number" ? o.exp : undefined, email: o.email };
+    const o = JSON.parse(json) as {
+      exp?: number;
+      email?: string;
+      user_id?: string;
+      sub?: string;
+    };
+    return {
+      exp: typeof o.exp === "number" ? o.exp : undefined,
+      email: o.email,
+      user_id: o.user_id,
+      sub: o.sub,
+    };
   } catch {
     return {};
   }

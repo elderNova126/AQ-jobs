@@ -23,18 +23,21 @@ Both are scored against every resume and ranked in one list, so you see the
 best-matching AfterQuery work regardless of which board it lives on. Rows carry
 an `ashby` / `experts` badge and the board filter narrows to either.
 
-Every row shows two buttons on both boards:
+Every row shows two buttons on both boards: **Apply** (the agent submits for
+you) and **Open ↗** (the posting / job description). Bulk apply at the top
+covers both boards.
 
-- **Ashby** — `Apply` runs the agent's fully automated submission; `Open ↗` opens
-  the posting.
-- **Experts** — `Apply ↗` opens that role's application form on
-  experts.afterquery.com (signed in, ready to submit); `Open ↗` opens the job
-  description.
+- **Ashby** submits through a real browser (reCAPTCHA v3 token minted in-page).
+- **Experts** submits through their own REST API as the signed-in user:
+  `POST /api/resume/upload` → `POST /api/applications/submit-with-review`,
+  with a **job-tailored, honest** pitch written by the LLM for the `experience`
+  field and education parsed from your resume. Requires an Experts sign-in
+  (paste your refresh token in the sidebar). Roles that *require* a credential
+  upload (a licence, NPI, …) are refused rather than submitted incomplete.
 
-Automated *submission* is deliberately limited to Ashby. Experts applications are
-login-gated on their own site and filing one is irreversible on a live
-marketplace, so the agent scores and ranks those roles and takes you straight
-into the application, rather than blind-submitting something it cannot verify.
+Both honour `AQ_DRY_RUN`: in dry-run the Experts flow writes the pitch and
+prepares the exact body, then stops — no upload, no submit, no side effect on
+your account.
 
 ### Does signing in reveal more jobs?
 
@@ -326,6 +329,7 @@ All optional except the API key — see [`.env.example`](.env.example).
 | `AQ_HEADFUL` | `0` | `1` = show the Chrome window while applying |
 | `AQ_EXPERTS` | `1` | `0` skips the Experts board entirely |
 | `AQ_FIREBASE_API_KEY` | AfterQuery's | Public Firebase key for the headless refresh-token exchange |
+| `AQ_JOB_SOURCE` | `AfterQuery` | "How did you hear about this?" value sent with Experts applications |
 | `AQ_USE_MY_CHROME` | `0` | `1` reads your login from your own Chrome profile (also a UI button) |
 | `AQ_CHROME_PROFILE` | auto | Which Chrome profile holds your login, e.g. `Default`, `Profile 1` |
 | `AQ_CHROME_PATH` / `AQ_CHROME_USER_DATA_DIR` | auto | Overrides if Chrome is in a non-standard location |
@@ -355,6 +359,7 @@ src/
     session.ts         auth status/capture across every route + Firebase ID token
     token-store.ts     headless refresh-token -> ID token exchange (the steady state)
     chrome.ts          "Use my Chrome": profile discovery, launch, CDP read
+    apply.ts           Experts auto-apply: resume upload, LLM pitch, submit
   resume/
     extract.ts         PDF/DOCX/TXT -> text, identity scraping
     profile.ts         resume -> structured profile

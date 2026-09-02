@@ -9,6 +9,7 @@ import { NAME_SHIM, errMsg } from "../util.js";
 import { openUserBrowser, readSessionFromBrowser } from "./chrome.js";
 import {
   clearTokenStore,
+  decodeJwt,
   freshToken,
   hasUsableToken,
   ingestIdToken,
@@ -465,6 +466,21 @@ export async function idToken(): Promise<string | null> {
   if (cached && cached.token && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token;
   await authStatus(true);
   return cached?.token ?? null;
+}
+
+/**
+ * The current signed-in identity for building an Experts submission body:
+ * a fresh ID token plus the uid/email decoded from it.
+ */
+export async function sessionInfo(): Promise<
+  { token: string; uid: string; email: string | null } | null
+> {
+  const token = await idToken();
+  if (!token) return null;
+  const claims = decodeJwt(token);
+  const uid = claims.user_id ?? claims.sub ?? "";
+  if (!uid) return null;
+  return { token, uid, email: claims.email ?? null };
 }
 
 /**

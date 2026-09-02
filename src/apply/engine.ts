@@ -19,6 +19,7 @@ import type {
 import { errMsg, mapLimit, newId, nowIso } from "../util.js";
 import { ApplySession } from "./browser.js";
 import { resolveForm, type ResolvedField } from "./fill.js";
+import { applyToExpertsJob } from "../experts/apply.js";
 
 /** Fields the UI requires before an Apply button unlocks. */
 export function missingIdentityFields(resume: Resume): string[] {
@@ -112,16 +113,10 @@ export async function applyToJob(
     return app;
   };
 
-  // Automated submission is implemented for the Ashby board only. The Experts
-  // board is a different product with its own form engine and reCAPTCHA
-  // Enterprise flow, so we score and rank those roles but refuse to pretend we
-  // can file them - the UI links out instead.
-  if (job.source !== "ashby") {
-    return finish(
-      "skipped",
-      "Automated apply covers the Ashby board only. Open this role on " +
-        "experts.afterquery.com to apply.",
-    );
+  // The Experts board submits via a REST call as the signed-in user (its own
+  // module handles resume upload + the tailored pitch + the POST). Hand off.
+  if (job.source === "experts") {
+    return applyToExpertsJob(resume, job);
   }
 
   const missing = missingIdentityFields(resume);

@@ -132,6 +132,19 @@ function toJob(j: ExpertsJob, isPool: boolean, syncedAt: string): Job {
  * Fetch the Experts board. Pass a Firebase ID token to fetch as the signed-in
  * user; omit it for the anonymous listing.
  */
+/** The raw listings objects, kept so we can send Ashby-style `jobData` on apply. */
+const rawByDocId = new Map<string, ExpertsJob>();
+
+/** The exact raw listings object for a docId (for the submit body's `jobData`). */
+export async function getExpertsRawJob(
+  docId: string,
+  idToken?: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (rawByDocId.has(docId)) return rawByDocId.get(docId) as unknown as Record<string, unknown>;
+  await fetchExpertsBoard(idToken); // refills the cache
+  return (rawByDocId.get(docId) as unknown as Record<string, unknown>) ?? null;
+}
+
 export async function fetchExpertsBoard(idToken?: string | null): Promise<Job[]> {
   const res = await retry(
     async () => {
@@ -152,6 +165,10 @@ export async function fetchExpertsBoard(idToken?: string | null): Promise<Job[]>
   const body = (await res.json()) as ListingsPayload;
   const syncedAt = nowIso();
 
+  rawByDocId.clear();
+  for (const j of [...(body.jobs ?? []), ...(body.pools ?? [])]) {
+    if (j?.docId) rawByDocId.set(j.docId, j);
+  }
   const jobs = (body.jobs ?? []).filter((j) => !j.archived).map((j) => toJob(j, false, syncedAt));
   const pools = (body.pools ?? []).filter((j) => !j.archived).map((j) => toJob(j, true, syncedAt));
 
