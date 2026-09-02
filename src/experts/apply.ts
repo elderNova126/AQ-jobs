@@ -5,6 +5,7 @@ import { CONFIG } from "../config.js";
 import { askStructured, llmReady } from "../llm.js";
 import type { Application, Job, Resume } from "../types.js";
 import { errMsg, newId, nowIso, truncate } from "../util.js";
+import { store } from "../store.js";
 import { CHROME_UA } from "../ashby/client.js";
 import { RESUME_MIME } from "../ashby/client.js";
 import { getExpertsRawJob } from "./client.js";
@@ -151,6 +152,9 @@ export async function applyToExpertsJob(resume: Resume, job: Job): Promise<Appli
     app.error = error;
     app.durationMs = Date.now() - started;
     app.finishedAt = nowIso();
+    // Persist so "skip already applied" and the Status column know about it.
+    // Not doing this is what let a bulk run re-submit roles filed minutes before.
+    store.putApplication(app);
     return app;
   };
 
@@ -243,6 +247,12 @@ export async function applyToExpertsJob(resume: Resume, job: Job): Promise<Appli
         msg = j.error ?? j.message ?? msg;
       } catch {
         if (detail) msg = detail.slice(0, 200);
+      }
+      // "Already applied" means an application for this role already exists on
+      // your account - that is the goal state, not a failure. Record it as
+      // submitted so it is skipped from now on instead of retried every run.
+      if (/already applied/i.test(msg)) {
+        return finish("submitted", "Already on file at AfterQuery Experts (applied earlier).");
       }
       return finish("failed", `Experts submit rejected: ${msg}`);
     }

@@ -39,6 +39,19 @@ Both honour `AQ_DRY_RUN`: in dry-run the Experts flow writes the pitch and
 prepares the exact body, then stops — no upload, no submit, no side effect on
 your account.
 
+**Only LLM-verified scores can trigger automated submission.** Keyword
+estimates (shown dimmed, marked `est`) are display-only and are excluded from
+bulk apply and the score threshold — a heuristic once qualified a software
+resume for "Dentist Expert", which is exactly the outcome this rule prevents.
+If the LLM is unavailable, per-row `Apply` still works on your own judgement;
+bulk does not.
+
+Bulk runs are **paced**: Experts submits run in parallel (plain REST), while
+Ashby submits run one at a time with a randomised ~75s gap (`AQ_ASHBY_GAP_MS`),
+because a burst of applications to one company reads as a bot. A role that
+AfterQuery reports as "already applied" is recorded as on file and skipped in
+future runs rather than counted as a failure.
+
 ### Does signing in reveal more jobs?
 
 **No** — worth stating plainly, because it looks like it does. The Experts

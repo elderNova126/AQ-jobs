@@ -100,19 +100,38 @@ export async function askStructured<T extends z.ZodType>(
 }
 
 async function askOpenai<T extends z.ZodType>(args: AskArgs<T>): Promise<z.infer<T>> {
-  const res = await getOpenai().responses.parse({
-    model: activeModel(),
-    // `instructions` is the stable prefix OpenAI's automatic caching keys on.
-    instructions: `${args.instructions}\n\n${args.cachedSystem}`,
-    input: args.user,
-    max_output_tokens: args.maxTokens ?? 4096,
-    text: { format: zodTextFormat(args.schema, args.name) },
-  });
+  const effort = args.effort ?? CONFIG.llm.effort;
+  // On gpt-5 the model's reasoning tokens count against max_output_tokens, so
+  // the cap must leave real headroom above the small JSON we actually want.
+  // Billing is only for tokens generated, so a generous ceiling is free when
+  // unused - and a tight one silently truncates, which is what made scoring
+  // fall back to the keyword heuristic across a whole board.
+  const cap = Math.max(16_000, (args.maxTokens ?? 4096) * 6);
+
+  const call = (eff: NonNullable<AskArgs<T>["effort"]>, maxOut: number) =>
+    getOpenai().responses.parse({
+      model: activeModel(),
+      // `instructions` is the stable prefix OpenAI's automatic caching keys on.
+      instructions: `${args.instructions}\n\n${args.cachedSystem}`,
+      input: args.user,
+      max_output_tokens: maxOut,
+      reasoning: { effort: eff },
+      text: { format: zodTextFormat(args.schema, args.name) },
+    });
+
+  let res = await call(effort, cap);
+
+  // Truncated by the cap: retry once with minimal reasoning and twice the room
+  // rather than failing the job (and then quietly scoring it by keyword).
+  if (res.status === "incomplete" && res.incomplete_details?.reason === "max_output_tokens") {
+    const u0 = res.usage;
+    if (u0) recordUsage(u0.input_tokens ?? 0, u0.output_tokens ?? 0, u0.input_tokens_details?.cached_tokens ?? 0);
+    res = await call("minimal", cap * 2);
+  }
 
   if (res.status === "incomplete") {
     throw new Error(
-      `model stopped early (${res.incomplete_details?.reason ?? "unknown"}); ` +
-        "raise maxTokens if this repeats",
+      `model stopped early (${res.incomplete_details?.reason ?? "unknown"}) even after a retry`,
     );
   }
   const u = res.usage;

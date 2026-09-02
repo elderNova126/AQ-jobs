@@ -116,17 +116,27 @@ export function heuristicScoreAll(resume: Resume, jobs: Job[]): Score[] {
   const resumeText = resume.text.toLowerCase();
   const jobTermSets = jobs.map((j) => termsOf(`${j.title} ${j.descriptionText}`));
 
-  const df = new Map<string, number>();
-  for (const set of jobTermSets) {
-    for (const w of set) df.set(w, (df.get(w) ?? 0) + 1);
-  }
-  const n = jobs.length;
-  const idf = (w: string): number => Math.log((n + 1) / ((df.get(w) ?? 0) + 0.5));
+  // IDF per BOARD, not across the mixed corpus. Ashby and Experts postings use
+  // very different vocabularies; pooling them lets each board's shared
+  // boilerplate look "distinctive" relative to the other and inflates scores
+  // for unrelated roles (a software resume once estimated 70+ for "Dentist").
+  const groups = new Map<string, { df: Map<string, number>; n: number }>();
+  jobs.forEach((j, i) => {
+    const g = groups.get(j.source) ?? { df: new Map<string, number>(), n: 0 };
+    g.n++;
+    for (const w of jobTermSets[i]!) g.df.set(w, (g.df.get(w) ?? 0) + 1);
+    groups.set(j.source, g);
+  });
+  const idfFor = (source: string) => {
+    const g = groups.get(source)!;
+    return (w: string): number => Math.log((g.n + 1) / ((g.df.get(w) ?? 0) + 0.5));
+  };
 
   const years = resume.profile?.yearsExperience ?? estimateYears(resume.text);
 
   return jobs.map((job, i) => {
     const set = jobTermSets[i]!;
+    const idf = idfFor(job.source);
     let matched = 0;
     let total = 0;
     let hits = 0;

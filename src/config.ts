@@ -157,8 +157,14 @@ export const CONFIG = {
   },
 
   apply: {
-    /** Parallel browser workers during a bulk apply. */
+    /** Parallel workers during a bulk apply (Experts only; Ashby is serial). */
     concurrency: num(process.env.AQ_APPLY_CONCURRENCY, 2),
+    /**
+     * Gap between consecutive Ashby submissions in a bulk run (randomised
+     * ±30%). Ashby's spam scoring reacts to velocity: many applications to one
+     * company within minutes get flagged regardless of the reCAPTCHA token.
+     */
+    ashbyGapMs: num(process.env.AQ_ASHBY_GAP_MS, 75_000),
     /** Show the browser window (useful for debugging a failed apply). */
     headful: process.env.AQ_HEADFUL === "1",
     /**

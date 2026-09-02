@@ -318,6 +318,8 @@ table.jobs tbody tr:hover { background: var(--surface-2); }
 .s-moderate { color: var(--warn); }
 .s-weak { color: var(--text-faint); }
 .s-none { color: var(--text-faint); font-weight: 400; font-size: 12px; }
+/* keyword estimates: visibly weaker than an LLM-assessed score */
+.s-est { opacity: .5; }
 
 .meter { height: 3px; border-radius: 999px; background: var(--surface-2); margin-top: 4px; overflow: hidden; }
 .meter i { display: block; height: 100%; border-radius: 999px; }

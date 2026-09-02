@@ -514,9 +514,12 @@ app.post("/api/apply", async (req, res) => {
     jobs = jobs.filter((j) => want.has(j.id));
   } else if (typeof body.minScore === "number") {
     const threshold = body.minScore;
+    // Only an LLM-verified score may qualify a role for automated submission.
+    // The keyword heuristic is a display estimate; letting it drive bulk apply
+    // once filed a software engineer's resume for "Dentist Expert".
     jobs = jobs.filter((j) => {
       const s = store.getScore(resume.id, j.id);
-      return s !== undefined && s.score >= threshold;
+      return s !== undefined && s.method === "llm" && s.score >= threshold;
     });
   } else {
     res.status(400).json({ error: "provide jobIds or minScore" });

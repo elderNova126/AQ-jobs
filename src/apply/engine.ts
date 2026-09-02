@@ -16,7 +16,7 @@ import type {
   ProgressEvent,
   Resume,
 } from "../types.js";
-import { errMsg, mapLimit, newId, nowIso } from "../util.js";
+import { errMsg, humanPause, mapLimit, newId, nowIso } from "../util.js";
 import { ApplySession } from "./browser.js";
 import { resolveForm, type ResolvedField } from "./fill.js";
 import { applyToExpertsJob } from "../experts/apply.js";
@@ -319,7 +319,7 @@ export async function applyToMany(
   emit({ kind: "apply-start", runId, resumeId: resume.id, jobIds: jobs.map((j) => j.id) });
 
   let done = 0;
-  const applications = await mapLimit(jobs, CONFIG.apply.concurrency, async (job) => {
+  const runOne = async (job: Job): Promise<Application> => {
     const app = await applyToJob(resume, job, {
       ...opts,
       onStep: (s) =>
@@ -328,7 +328,27 @@ export async function applyToMany(
     done++;
     emit({ kind: "apply-one", runId, application: app, done, total: jobs.length });
     return app;
-  });
+  };
+
+  // Experts submits are plain REST calls with no captcha - run them in parallel.
+  // Ashby submits go through reCAPTCHA v3 and Ashby's own spam scoring, and six
+  // applications to one company inside two minutes reads as a bot no matter how
+  // good each token is. So Ashby runs strictly one at a time with a human-paced,
+  // randomised gap between submissions.
+  const expertsJobs = jobs.filter((j) => j.source === "experts");
+  const ashbyJobs = jobs.filter((j) => j.source !== "experts");
+
+  const expertsDone = mapLimit(expertsJobs, CONFIG.apply.concurrency, runOne);
+  const ashbyDone: Application[] = [];
+  for (let i = 0; i < ashbyJobs.length; i++) {
+    if (i > 0) {
+      const gap = CONFIG.apply.ashbyGapMs;
+      emit({ kind: "apply-step", runId, jobId: ashbyJobs[i]!.id, jobTitle: ashbyJobs[i]!.title, step: "pacing before next Ashby submit" });
+      await humanPause(gap * 0.7, gap * 1.3);
+    }
+    ashbyDone.push(await runOne(ashbyJobs[i]!));
+  }
+  const applications = [...(await expertsDone), ...ashbyDone];
 
   await store.flush();
   const submitted = applications.filter(

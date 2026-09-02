@@ -355,13 +355,16 @@ function renderJobs() {
   $("jobsTitle").textContent = r ? `Job matches · ${esc(r.label)}` : "Job matches";
 
   const scored = scores.size;
-  const method = scored ? [...scores.values()][0].method : null;
+  const llmCount = [...scores.values()].filter((x) => x.method === "llm").length;
+  const estCount = scored - llmCount;
   $("scoreStatus").textContent = !r
     ? "Select a resume to see its scores."
     : state.scoring
       ? `Scoring ${state.scoring.done}/${state.scoring.total}…`
       : scored
-        ? `${scored} of ${state.jobs.length} scored${method === "heuristic" ? " (keyword heuristic - set OPENAI_API_KEY for real scoring)" : ""}`
+        ? `${llmCount} LLM-scored` +
+          (estCount ? ` · ${estCount} keyword estimates (dimmed; never auto-applied)` : "") +
+          (llmCount === 0 ? " — set OPENAI_API_KEY for real scoring" : "")
         : "Not scored yet.";
 
   $("shownCount").textContent = `${rows.length} of ${state.jobs.length}`;
@@ -378,9 +381,13 @@ function renderJobs() {
     const tr = document.createElement("tr");
 
     // score
+    // Heuristic (keyword) scores are estimates: dimmed, marked "est", and never
+    // used for auto-apply. Only LLM-verified scores render at full strength.
+    const isEst = s ? s.method !== "llm" : false;
     const scoreCell = s
-      ? `<span class="score ${scoreClass(s.score)}">${s.score}<small>/100</small></span>
-         <div class="meter"><i style="width:${s.score}%;background:${scoreColor(s.score)}"></i></div>`
+      ? `<span class="score ${scoreClass(s.score)}${isEst ? " s-est" : ""}"
+               title="${isEst ? "keyword estimate - not used for automated apply" : "LLM-assessed match"}">${s.score}<small>${isEst ? " est" : "/100"}</small></span>
+         <div class="meter${isEst ? " s-est" : ""}"><i style="width:${s.score}%;background:${scoreColor(s.score)}"></i></div>`
       : `<span class="s-none">—</span>`;
 
     // status
@@ -458,6 +465,8 @@ function renderBulk() {
     if (j.source === "experts" && !state.auth.signedIn) return false;
     const s = scores.get(j.id);
     if (!s || s.score < min) return false;
+    // Keyword estimates never qualify a role for automated submission.
+    if (s.method !== "llm") return false;
     if (skip && r && latestApp(r.id, j.id)?.status === "submitted") return false;
     return true;
   });
