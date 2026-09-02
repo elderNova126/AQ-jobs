@@ -185,8 +185,12 @@ export async function ingestRefreshToken(
   refreshToken: string,
   apiKey?: string,
 ): Promise<{ ok: boolean; error?: string; email?: string | null }> {
-  const rt = refreshToken.trim();
-  const key = (apiKey ?? CONFIG.experts.firebaseApiKey).trim();
+  // Strip quotes/whitespace/JSON-ish wrappers people paste by accident.
+  const rt = refreshToken
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, "");
+  const key = (apiKey?.trim() || CONFIG.experts.firebaseApiKey).trim();
   if (!rt) return { ok: false, error: "a refresh token is required" };
   if (!key) return { ok: false, error: "a Firebase Web API key is required" };
   load();

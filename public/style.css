@@ -117,8 +117,16 @@ a:hover { text-decoration: underline; }
   .layout { grid-template-columns: 1fr; }
 }
 
-.sidebar { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 74px; }
-@media (max-width: 1080px) { .sidebar { position: static; } }
+.sidebar {
+  display: flex; flex-direction: column; gap: 16px;
+  position: sticky; top: 74px;
+  /* Stay within the viewport and scroll internally so tall content (identity
+     form, sign-in card, activity log) is never clipped. */
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+@media (max-width: 1080px) { .sidebar { position: static; max-height: none; overflow: visible; } }
 
 .content { min-width: 0; }
 

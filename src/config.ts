@@ -111,7 +111,7 @@ export const CONFIG = {
      * state survive headlessly, with no browser, across restarts.
      */
     firebaseApiKey:
-      process.env.AQ_FIREBASE_API_KEY ?? "AIzaSyBk8ZcYp3QaFiOqxC9haN99InPLHUC1HIk",
+      process.env.AQ_FIREBASE_API_KEY?.trim() || "AIzaSyBk8ZcYp3QaFiOqxC9haN99InPLHUC1HIk",
     /** Where the captured refresh token + API key persist (0600, gitignored). */
     authStoreFile: path.join(ROOT, "data", "experts-auth.json"),
   },

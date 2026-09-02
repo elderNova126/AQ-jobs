@@ -213,8 +213,11 @@ app.post("/api/auth/refresh-token", async (req, res) => {
     } catch (err) {
       console.warn(`[auth] post-paste sync failed: ${errMsg(err)}`);
     }
+    res.json(status);
+    return;
   }
-  res.status(status.signedIn ? 200 : 502).json(status);
+  // Surface the real reason (INVALID_REFRESH_TOKEN, etc.) so the UI can show it.
+  res.status(400).json({ ...status, error: status.detail ?? "token was rejected" });
 });
 
 app.post("/api/auth/signout", async (_req, res) => {

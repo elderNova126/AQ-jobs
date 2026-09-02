@@ -24,7 +24,6 @@ const state = {
   filters: { q: "", dept: "", source: "", sort: "score" },
   auth: { signedIn: false, email: null, hasProfile: false, detail: "" },
   counts: { ashby: 0, experts: 0 },
-  chrome: { available: false, profiles: [], chosen: null },
   signingIn: false,
   scoring: null,
   applyRun: null,
@@ -108,7 +107,6 @@ async function loadState() {
   state.applications = s.applications;
   state.jobsSyncedAt = s.jobsSyncedAt;
   state.auth = s.auth ?? state.auth;
-  state.chrome = s.chrome ?? state.chrome;
   state.counts = s.counts ?? state.counts;
   state.llmDetail = s.llmDetail ?? "";
 
@@ -162,95 +160,53 @@ function renderAuth() {
   const a = state.auth;
   const pill = $("authPill");
   const btn = $("authBtn");
-  const note = $("authNote");
 
-  if (state.signingIn) {
-    pill.textContent = "Experts: signing in…";
-    pill.className = "pill";
-    btn.disabled = true;
-    btn.textContent = "Waiting…";
-    if (note) note.hidden = true;
-    return;
-  }
-
-  btn.disabled = false;
   if (a.signedIn) {
-    const where = a.via === "your-browser" ? "your browser" : "agent profile";
     pill.textContent = `Experts: ${a.email ?? "signed in"}`;
     pill.className = "pill pill-ok";
-    pill.title = `${a.detail ?? ""} (via ${where})`;
+    pill.title = a.detail ?? "";
+    btn.hidden = false;
     btn.textContent = "Sign out";
-    if (note) note.hidden = true;
-    return;
+  } else {
+    pill.textContent = "Experts: not signed in";
+    pill.className = "pill pill-off";
+    pill.title = a.detail ?? "";
+    // Sign-in happens in the sidebar card (paste a refresh token), so the
+    // header only offers Sign out once a session exists.
+    btn.hidden = true;
   }
-
-  pill.textContent = "Experts: not signed in";
-  pill.className = "pill pill-off";
-  pill.title = a.detail ?? "";
-  btn.textContent = "Sign in";
   renderAuthCard();
 }
 
-/**
- * The sidebar card. The confusing part - "I'm logged in in my own browser, why
- * doesn't it show?" - is answered here with two concrete buttons rather than a
- * wall of text: use that Chrome login, or sign in separately.
- */
+/** Sidebar card: paste-a-refresh-token sign-in and current status. */
 function renderAuthCard() {
   const a = state.auth;
   const chip = $("authChip");
   const note = $("authNote");
   const btns = $("authBtns");
-  const detail = $("chromeDetail");
-  const useBtn = $("useChromeBtn");
 
   if (a.signedIn) {
-    const via =
-      a.via === "refresh-token" ? "a stored refresh token (headless)"
-      : a.via === "my-chrome" ? "your Chrome"
-      : a.via === "your-browser" ? "your attached Chrome"
-      : "the agent's own profile";
     chip.textContent = "signed in";
     chip.className = "chip chip-ok";
     note.hidden = false;
-    note.innerHTML = `Signed in as <strong>${esc(a.email ?? "")}</strong>, via ${esc(via)}. ` +
+    note.innerHTML =
+      `Signed in as <strong>${esc(a.email ?? "")}</strong> — headless, no browser needed. ` +
       `Fetching the ${state.counts.experts} Experts roles as you.`;
     btns.hidden = true;
-    detail.hidden = true;
+    $("pasteForm").hidden = true;
     return;
   }
 
   chip.textContent = "not signed in";
   chip.className = "chip chip-bad";
-
   note.hidden = false;
   note.innerHTML =
-    `Being logged in to AfterQuery in your normal Chrome doesn't show here on its own — ` +
-    `a page on <code>localhost</code> can't read another site's session (same-origin policy). ` +
-    `Two ways to fix it:`;
+    `Sign in with a Firebase refresh token to fetch the ${state.counts.experts} ` +
+    `Experts roles as you. Works for any account, no browser needed.`;
+  // Keep the button visible unless the paste form is already open.
+  btns.hidden = !$("pasteForm").hidden;
 
-  btns.hidden = false;
-  const ch = state.chrome || {};
-  if (ch.available && (ch.chosen || (ch.profiles || []).some((p) => p.hasExpertsLogin))) {
-    const chosen = ch.chosen || (ch.profiles || []).find((p) => p.hasExpertsLogin);
-    useBtn.disabled = false;
-    useBtn.textContent = "Use my Chrome login";
-    detail.hidden = false;
-    detail.innerHTML =
-      `<strong>Use my Chrome login</strong> reopens your <em>${esc(chosen?.name || chosen?.dir || "Chrome")}</em> profile ` +
-      `(all logins intact) and reads the session live — nothing is copied. ` +
-      `<strong>Fully quit Chrome first</strong>, then click, because Chrome only opens its debug port at startup.`;
-  } else {
-    useBtn.disabled = true;
-    useBtn.textContent = "Use my Chrome (not found)";
-    detail.hidden = false;
-    detail.textContent = ch.reason
-      ? `Can't use your Chrome automatically: ${ch.reason}. Use "Sign in separately" instead.`
-      : `No AfterQuery login found in your Chrome profiles yet. Use "Sign in separately".`;
-  }
-
-  // If a my-chrome attempt just failed (e.g. Chrome still open), show why.
-  if (a.via === "my-chrome" && a.reason === "error" && a.detail) {
+  if (a.reason === "error" && a.detail) {
     note.innerHTML += `<br /><span class="err">${esc(a.detail)}</span>`;
   }
 }
@@ -851,74 +807,25 @@ function wire() {
     }
   });
 
+  // The header button is Sign-out only; sign-in is the paste form in the card.
   $("authBtn").addEventListener("click", async () => {
-    if (state.auth.signedIn) {
-      if (!confirm("Sign out of AfterQuery Experts? This deletes the saved browser profile.")) return;
-      await api("/api/auth/signout", { method: "POST" });
-      await loadState();
-      log("signed out of Experts", "warn");
-      return;
-    }
-    state.signingIn = true;
-    renderAuth();
-    toast("A browser window is opening — sign in with Google there.", "ok");
-    log("opening sign-in window…");
-    try {
-      const st = await api("/api/auth/signin", { method: "POST" });
-      state.signingIn = false;
-      if (st.signedIn) {
-        log(`signed in as ${st.email}`, "ok");
-        toast(`Signed in as ${st.email}`, "ok");
-      } else {
-        log(st.detail || "sign-in not completed", "warn");
-        toast(st.detail || "Sign-in was not completed", "err");
-      }
-      await loadState();
-    } catch (err) {
-      state.signingIn = false;
-      toast(err.message, "err");
-      log(`sign-in failed: ${err.message}`, "err");
-      renderAuth();
-    }
+    if (!state.auth.signedIn) return;
+    if (!confirm("Sign out of AfterQuery Experts? This clears the stored token.")) return;
+    await api("/api/auth/signout", { method: "POST" });
+    await loadState();
+    log("signed out of Experts", "warn");
   });
-
-  const runUseChrome = async () => {
-    const chosen = (state.chrome?.chosen) || (state.chrome?.profiles || []).find((p) => p.hasExpertsLogin);
-    state.signingIn = true;
-    renderAuth();
-    toast("Reopening your Chrome to read the AfterQuery login…", "ok");
-    log("use-my-chrome: launching your Chrome profile…");
-    try {
-      const st = await api("/api/auth/use-my-chrome", {
-        method: "POST",
-        body: JSON.stringify({ profile: chosen?.dir }),
-      });
-      state.signingIn = false;
-      if (st.signedIn) {
-        log(`read login from your Chrome: ${st.email}`, "ok");
-        toast(`Signed in as ${st.email} (via your Chrome)`, "ok");
-      } else {
-        log(st.detail || "could not read a login from your Chrome", "warn");
-        toast(st.detail || "No login found in your Chrome", "err");
-      }
-      await loadState();
-    } catch (err) {
-      state.signingIn = false;
-      toast(err.message, "err");
-      log(`use-my-chrome failed: ${err.message}`, "err");
-      renderAuth();
-    }
-  };
-
-  $("useChromeBtn").addEventListener("click", runUseChrome);
-  $("agentSignInBtn").addEventListener("click", () => $("authBtn").click());
 
   $("pasteTokenBtn").addEventListener("click", () => {
     const f = $("pasteForm");
-    f.hidden = !f.hidden;
-    if (!f.hidden) f.refreshToken.focus();
+    f.hidden = false;
+    $("authBtns").hidden = true;
+    f.refreshToken.focus();
   });
-  $("pasteCancel").addEventListener("click", () => { $("pasteForm").hidden = true; });
+  $("pasteCancel").addEventListener("click", () => {
+    $("pasteForm").hidden = true;
+    renderAuthCard();
+  });
   $("pasteForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;
