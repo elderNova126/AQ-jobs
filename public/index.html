@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AfterQuery Apply Agent</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">AQ</span>
+        <div>
+          <h1>AfterQuery Apply Agent</h1>
+          <p class="sub" id="boardStatus">loading board…</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="pill" id="llmPill">LLM …</span>
+        <span class="pill pill-warn" id="dryRunPill" hidden>DRY RUN</span>
+        <span class="pill" id="authPill" title="AfterQuery Experts sign-in">Experts: …</span>
+        <button class="btn btn-ghost" id="authBtn">Sign in</button>
+        <button class="btn btn-ghost" id="syncBtn">Sync jobs</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- ------------------------- sidebar ------------------------- -->
+      <aside class="sidebar">
+        <section class="card">
+          <div class="card-head">
+            <h2>Resumes</h2>
+            <span class="count" id="resumeCount">0</span>
+          </div>
+
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md,.rtf" multiple hidden />
+            <strong>Drop resumes here</strong>
+            <span>or click to choose · PDF, DOCX, TXT, MD, RTF</span>
+          </label>
+
+          <ul class="resume-list" id="resumeList"></ul>
+          <p class="empty" id="resumeEmpty">No resumes yet. Upload your primary resume to start.</p>
+        </section>
+
+        <section class="card" id="identityCard" hidden>
+          <div class="card-head">
+            <h2>Applicant details</h2>
+            <span class="chip" id="identityState"></span>
+          </div>
+          <p class="hint">
+            Used to fill every application. Apply stays locked until the four
+            required fields are set.
+          </p>
+
+          <form id="identityForm" class="form">
+            <div class="row2">
+              <label>First name <span class="req">*</span>
+                <input name="firstName" autocomplete="given-name" required />
+              </label>
+              <label>Last name <span class="req">*</span>
+                <input name="lastName" autocomplete="family-name" required />
+              </label>
+            </div>
+            <label>Email <span class="req">*</span>
+              <input name="email" type="email" autocomplete="email" required />
+            </label>
+            <label>LinkedIn URL <span class="req">*</span>
+              <input name="linkedinUrl" type="url" placeholder="https://linkedin.com/in/…" required />
+            </label>
+            <label>GitHub URL <span class="req">*</span>
+              <input name="githubUrl" type="url" placeholder="https://github.com/…" required />
+            </label>
+
+            <details class="more">
+              <summary>Optional &amp; work authorization</summary>
+              <div class="row2">
+                <label>Phone <input name="phone" autocomplete="tel" /></label>
+                <label>Location <input name="location" placeholder="San Francisco, CA" /></label>
+              </div>
+              <label>Website / portfolio <input name="websiteUrl" type="url" /></label>
+              <div class="row2">
+                <label>Authorized to work (US)
+                  <select name="usAuthorized">
+                    <option value="">Let the agent infer</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </label>
+                <label>Needs visa sponsorship
+                  <select name="needsSponsorship">
+                    <option value="">Let the agent infer</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </label>
+              </div>
+              <p class="hint small">
+                These two questions appear on every AfterQuery posting. Set them
+                explicitly and the agent will never guess.
+              </p>
+            </details>
+
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">Save details</button>
+              <span class="saved" id="savedFlag" hidden>Saved</span>
+            </div>
+          </form>
+        </section>
+
+        <section class="card" id="activityCard">
+          <div class="card-head">
+            <h2>Activity</h2>
+            <button class="btn btn-tiny" id="clearLog">Clear</button>
+          </div>
+          <ul class="log" id="log"></ul>
+        </section>
+      </aside>
+
+      <!-- ------------------------- jobs ------------------------- -->
+      <section class="content">
+        <div class="card">
+          <div class="bulkbar">
+            <div class="bulk-left">
+              <h2 id="jobsTitle">Job matches</h2>
+              <p class="sub" id="scoreStatus">Select a resume to see its scores.</p>
+            </div>
+
+            <div class="bulk-right">
+              <label class="inline">
+                Min score
+                <input type="number" id="minScore" min="0" max="100" step="5" value="70" />
+              </label>
+              <label class="inline checkbox">
+                <input type="checkbox" id="skipApplied" checked />
+                Skip already applied
+              </label>
+              <button class="btn btn-primary" id="bulkApplyBtn" disabled>
+                Apply to matching jobs
+              </button>
+            </div>
+          </div>
+
+          <div class="progress" id="progressWrap" hidden>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <span class="progress-text" id="progressText"></span>
+          </div>
+
+          <div class="filters">
+            <input type="search" id="search" placeholder="Filter by title, team or location…" />
+            <select id="deptFilter"><option value="">All departments</option></select>
+            <select id="sourceFilter">
+              <option value="">Both boards</option>
+              <option value="ashby">Ashby (full-time)</option>
+              <option value="experts">Experts (contract)</option>
+            </select>
+            <select id="sortBy">
+              <option value="score">Sort: best match</option>
+              <option value="title">Sort: title</option>
+              <option value="department">Sort: department</option>
+            </select>
+            <span class="spacer"></span>
+            <span class="shown" id="shownCount"></span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="jobs">
+              <thead>
+                <tr>
+                  <th class="c-score">Match</th>
+                  <th>Role</th>
+                  <th class="c-dept">Team</th>
+                  <th class="c-loc">Location</th>
+                  <th class="c-status">Status</th>
+                  <th class="c-act"></th>
+                </tr>
+              </thead>
+              <tbody id="jobRows"></tbody>
+            </table>
+            <p class="empty" id="jobsEmpty">No jobs loaded yet.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- job / application detail drawer -->
+    <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+    <aside class="drawer" id="drawer" hidden>
+      <div class="drawer-head">
+        <h2 id="drawerTitle"></h2>
+        <button class="btn btn-tiny" id="drawerClose">Close</button>
+      </div>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
