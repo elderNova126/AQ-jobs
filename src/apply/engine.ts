@@ -235,28 +235,47 @@ export async function applyToJob(
     }
 
     // --- submit ---------------------------------------------------------
-    step("verifying (reCAPTCHA)");
-    const token = await session.recaptchaToken();
-
-    step("submitting");
-    const result = await session.gql<{
+    type SubmitResult = {
       submitApplicationFormAction: {
         applicationFormResult: (Partial<AshbyFormRender> & { _?: unknown }) | null;
         messages: { blockMessageForCandidateHtml: string | null } | null;
       };
-    }>("ApiSubmitSingleApplicationFormAction", {
-      organizationHostedJobsPageName: CONFIG.ashby.orgSlug,
-      jobPostingId: job.id,
-      formRenderIdentifier: renderId,
-      formDefinitionIdentifier: formDefinitionId,
-      actionIdentifier: control.identifier,
-      recaptchaToken: token,
-      sourceAttributionCode: null,
-      viewedAutomatedProcessingLegalNoticeRuleId:
-        posting.automatedProcessingLegalNotice?.automatedProcessingLegalNoticeRuleId ?? null,
-      deviceFingerprint: null,
-      applicationRequestId: null,
-    });
+    };
+    const submitOnce = async (): Promise<SubmitResult> => {
+      // A fresh reCAPTCHA token (minted after a warmup) for each attempt.
+      const token = await session!.recaptchaToken();
+      return session!.gql<SubmitResult>("ApiSubmitSingleApplicationFormAction", {
+        organizationHostedJobsPageName: CONFIG.ashby.orgSlug,
+        jobPostingId: job.id,
+        formRenderIdentifier: renderId,
+        formDefinitionIdentifier: formDefinitionId,
+        actionIdentifier: control.identifier,
+        recaptchaToken: token,
+        sourceAttributionCode: null,
+        viewedAutomatedProcessingLegalNoticeRuleId:
+          posting.automatedProcessingLegalNotice?.automatedProcessingLegalNoticeRuleId ?? null,
+        deviceFingerprint: null,
+        applicationRequestId: null,
+      });
+    };
+
+    const spamFlagged = (r: SubmitResult): boolean =>
+      /flagged as possible spam|possible spam/i.test(
+        JSON.stringify(r.submitApplicationFormAction ?? {}),
+      );
+
+    step("verifying (reCAPTCHA)");
+    step("submitting");
+    let result = await submitOnce();
+
+    // Ashby scores the reCAPTCHA token for spam; a low score gets flagged with a
+    // "submit again" hint. A second attempt with a fresh token, after more
+    // warmup and a short human-paced pause, usually clears a borderline score.
+    if (spamFlagged(result)) {
+      step("flagged as spam — retrying with a fresh token");
+      await session.pause(2500, 4500);
+      result = await submitOnce();
+    }
 
     const payload = result.submitApplicationFormAction;
     const formBack = payload.applicationFormResult;
@@ -269,10 +288,15 @@ export async function applyToJob(
       for (const m of formBack.errorMessages ?? []) if (m) msgs.push(m);
       const block = payload.messages?.blockMessageForCandidateHtml;
       if (block) msgs.push(block.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-      return finish(
-        "failed",
-        msgs.length ? msgs.join("; ") : "Ashby rejected the submission without a reason",
-      );
+      let detail = msgs.length ? msgs.join("; ") : "Ashby rejected the submission without a reason";
+      // A spam flag is a low reCAPTCHA score. Point at the fix that actually
+      // moves the score, rather than leaving the user to guess.
+      if (/spam/i.test(detail) && !CONFIG.apply.headful) {
+        detail +=
+          " — this is a low reCAPTCHA score from headless mode. Set AQ_HEADFUL=1 " +
+          "(and use real Chrome) and re-apply; a visible browser scores far higher.";
+      }
+      return finish("failed", detail);
     }
 
     return finish("submitted", null);

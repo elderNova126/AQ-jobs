@@ -1,8 +1,9 @@
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import fs from "node:fs";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { CONFIG } from "../config.js";
 import { ASHBY_OPS, type AshbyOpName } from "../ashby/gql-ops.js";
 import { AshbyError, CHROME_UA } from "../ashby/client.js";
-import { NAME_SHIM, errMsg, humanPause, retry } from "../util.js";
+import { NAME_SHIM, errMsg, humanPause, retry, sleep } from "../util.js";
 
 /**
  * A real Chrome, driven for two reasons.
@@ -17,41 +18,119 @@ import { NAME_SHIM, errMsg, humanPause, retry } from "../util.js";
  *    browser's own rather than a server-side imitation.
  */
 
-let browser: Browser | null = null;
-let launching: Promise<Browser> | null = null;
+let ctx: BrowserContext | null = null;
+let launching: Promise<BrowserContext> | null = null;
 
-async function getBrowser(): Promise<Browser> {
-  if (browser?.isConnected()) return browser;
+/**
+ * A shared, warm browser context for applying.
+ *
+ * Three things here exist specifically to keep reCAPTCHA v3 happy, because Ashby
+ * uses the token's score for spam detection and a low score gets the application
+ * flagged:
+ *  - **Real Chrome** (channel chrome/msedge), not bundled Chromium — Google
+ *    scores a genuine Chrome build far higher than headless test Chromium.
+ *  - **A persistent profile** reused across runs — cookies and history make the
+ *    browser look like a returning human rather than a fresh bot each time.
+ *  - **Headful when you can** (`AQ_HEADFUL=1`) — a visible browser scores much
+ *    better than any headless mode. On a desktop this is the single biggest win.
+ */
+async function launchCtx(): Promise<BrowserContext> {
+  fs.mkdirSync(CONFIG.apply.profileDir, { recursive: true });
+  const base = {
+    headless: !CONFIG.apply.headful,
+    viewport: { width: 1440, height: 900 },
+    locale: "en-US",
+    timezoneId: "America/Los_Angeles",
+    serviceWorkers: "block" as const,
+    args: ["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+  };
+
+  const setup = async (c: BrowserContext): Promise<BrowserContext> => {
+    await c.addInitScript(NAME_SHIM);
+    // Images/fonts/media are irrelevant to us; blocking them halves load time.
+    await c.route("**/*", (route) => {
+      const t = route.request().resourceType();
+      if (t === "image" || t === "font" || t === "media") return route.abort();
+      return route.continue();
+    });
+    return c;
+  };
+
+  const channels = CONFIG.apply.browserChannel ? [CONFIG.apply.browserChannel] : ["chrome", "msedge"];
+  let lastErr: unknown;
+  for (const channel of channels) {
+    try {
+      return await setup(
+        await chromium.launchPersistentContext(CONFIG.apply.profileDir, { ...base, channel }),
+      );
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  // Bundled Chromium as a last resort. It still works, but reCAPTCHA scores it
+  // lower, so real Chrome is strongly preferred (see AQ_HEADFUL / channel).
+  try {
+    return await setup(
+      await chromium.launchPersistentContext(CONFIG.apply.profileDir, {
+        ...base,
+        userAgent: CHROME_UA,
+      }),
+    );
+  } catch {
+    throw new Error(
+      `could not start a browser for applying: ${errMsg(lastErr)}. ` +
+        `Install Chrome, or run \`npx playwright install chromium\`.`,
+    );
+  }
+}
+
+async function getContext(): Promise<BrowserContext> {
+  if (ctx) return ctx;
   if (launching) return launching;
-  launching = chromium
-    .launch({
-      headless: !CONFIG.apply.headful,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--disable-dev-shm-usage",
-      ],
-    })
-    .then((b) => {
-      browser = b;
+  launching = launchCtx()
+    .then((c) => {
+      ctx = c;
       launching = null;
-      b.on("disconnected", () => {
-        if (browser === b) browser = null;
+      c.on("close", () => {
+        if (ctx === c) ctx = null;
       });
-      return b;
+      return c;
     })
     .catch((err) => {
       launching = null;
-      throw new Error(
-        `could not start Chromium: ${errMsg(err)}. Run \`npx playwright install chromium\`.`,
-      );
+      throw err;
     });
   return launching;
 }
 
 export async function closeBrowser(): Promise<void> {
-  const b = browser;
-  browser = null;
-  if (b?.isConnected()) await b.close().catch(() => {});
+  const c = ctx;
+  ctx = null;
+  await c?.close().catch(() => {});
+}
+
+/**
+ * A little human-like activity so reCAPTCHA v3 sees "a person is here".
+ *
+ * v3 scores partly on interaction signals, so a few mouse moves, a small scroll
+ * and a short dwell before we mint the token measurably lifts the score.
+ */
+async function humanize(page: Page): Promise<void> {
+  try {
+    const points: [number, number][] = [
+      [200 + Math.random() * 300, 200 + Math.random() * 200],
+      [500 + Math.random() * 400, 350 + Math.random() * 250],
+      [300 + Math.random() * 500, 500 + Math.random() * 200],
+    ];
+    for (const [x, y] of points) {
+      await page.mouse.move(x, y, { steps: 8 + Math.floor(Math.random() * 10) });
+      await sleep(120 + Math.random() * 220);
+    }
+    await page.mouse.wheel(0, 250 + Math.random() * 400);
+    await sleep(400 + Math.random() * 600);
+  } catch {
+    /* warmup is best-effort */
+  }
 }
 
 /** Reported by the page so a submit failure can say what the browser saw. */
@@ -61,7 +140,6 @@ export interface PageGqlError {
 
 export class ApplySession {
   private constructor(
-    private readonly ctx: BrowserContext,
     readonly page: Page,
     readonly jobId: string,
   ) {}
@@ -71,27 +149,8 @@ export class ApplySession {
    * button on afterquery.com/careers points at.
    */
   static async open(jobId: string): Promise<ApplySession> {
-    const b = await getBrowser();
-    const ctx = await b.newContext({
-      viewport: { width: 1440, height: 900 },
-      userAgent: CHROME_UA,
-      locale: "en-US",
-      timezoneId: "America/Los_Angeles",
-      // Cut page weight without touching anything the form or captcha needs.
-      serviceWorkers: "block",
-    });
-
-    // Keep in-page code immune to esbuild's __name transform (see NAME_SHIM).
-    await ctx.addInitScript(NAME_SHIM);
-
-    // Images and fonts are irrelevant to us; blocking them halves load time.
-    await ctx.route("**/*", (route) => {
-      const type = route.request().resourceType();
-      if (type === "image" || type === "font" || type === "media") return route.abort();
-      return route.continue();
-    });
-
-    const page = await ctx.newPage();
+    const context = await getContext();
+    const page = await context.newPage();
     const url = `${CONFIG.ashby.jobsHost}/${CONFIG.ashby.orgSlug}/${jobId}/application`;
 
     try {
@@ -118,11 +177,11 @@ export class ApplySession {
         { timeout: 30_000 },
       );
     } catch (err) {
-      await ctx.close().catch(() => {});
+      await page.close().catch(() => {});
       throw new Error(`could not open application page for ${jobId}: ${errMsg(err)}`);
     }
 
-    return new ApplySession(ctx, page, jobId);
+    return new ApplySession(page, jobId);
   }
 
   /**
@@ -133,6 +192,8 @@ export class ApplySession {
    * are short-lived (~2 min), so we always mint immediately before submitting.
    */
   async recaptchaToken(action = CONFIG.ashby.recaptchaAction): Promise<string> {
+    // Warm up interaction signals right before minting — lifts the v3 score.
+    await humanize(this.page);
     const token = await this.page.evaluate(
       async ({ key, act }) => {
         const g = (globalThis as {
@@ -214,6 +275,7 @@ export class ApplySession {
   }
 
   async close(): Promise<void> {
-    await this.ctx.close().catch(() => {});
+    // Close only this page; the warm profile/context is shared and reused.
+    await this.page.close().catch(() => {});
   }
 }

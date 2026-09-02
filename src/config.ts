@@ -165,6 +165,13 @@ export const CONFIG = {
      * AfterQuery's ATS.
      */
     dryRun: process.env.AQ_DRY_RUN === "1",
+    /**
+     * Warm persistent profile for the apply browser. Reused across runs so
+     * reCAPTCHA v3 sees a returning browser (higher score = fewer spam flags).
+     */
+    profileDir: path.join(ROOT, "data", "apply-profile"),
+    /** Browser channel for applying: blank auto-detects real Chrome, then Edge. */
+    browserChannel: process.env.AQ_BROWSER_CHANNEL ?? "",
   },
 };
 

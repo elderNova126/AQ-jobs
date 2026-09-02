@@ -272,6 +272,18 @@ Scoring is the main spend: ~$0.02/role on gpt-5, so scoring one resume against
 the default top-80 is roughly $1–2. Lower `AQ_SCORE_LIMIT` (or `AQ_EFFORT`) to
 spend less; the heuristic still ranks every role for free.
 
+## If a submission is flagged as spam
+
+Ashby scores the reCAPTCHA v3 token and flags low scores as "possible spam".
+Score is about how human the browser looks, so the agent uses **real Chrome**, a
+**warm persistent profile** (`data/apply-profile/`, reused), and human-like
+mouse/scroll/dwell before minting each token, and it **retries once** with a
+fresh token on a spam flag.
+
+The single biggest lever is **`AQ_HEADFUL=1`** — a visible browser window scores
+far higher than any headless mode. If you see spam flags with `AQ_DRY_RUN=0`,
+set `AQ_HEADFUL=1` and re-apply.
+
 ## Safety
 
 - `AQ_DRY_RUN=1` runs everything — browser, form read, answers, resume upload,
