@@ -53,8 +53,8 @@
             <button class="btn btn-primary" id="pasteTokenBtn">Sign in with a refresh token</button>
           </div>
           <form class="form" id="pasteForm" hidden>
-            <label>Firebase refresh token
-              <input name="refreshToken" placeholder="paste the long token from your session" autocomplete="off" />
+            <label>Refresh token (or the whole stsTokenManager object)
+              <input name="refreshToken" placeholder="AMf-… refreshToken, or paste the whole object" autocomplete="off" />
             </label>
             <label>Web API key <span class="muted">(optional — defaults to AfterQuery's)</span>
               <input name="apiKey" placeholder="AIza…" autocomplete="off" />
@@ -64,10 +64,12 @@
               <button class="btn" type="button" id="pasteCancel">Cancel</button>
             </div>
             <p class="hint small">
-              Once stored, the agent stays signed in with no browser — it mints
-              fresh tokens automatically, even after a restart. Get the token from
-              your browser DevTools → Application → IndexedDB →
-              <code>firebaseLocalStorageDb</code> → the <code>stsTokenManager.refreshToken</code> value.
+              DevTools → Application → IndexedDB → <code>firebaseLocalStorageDb</code>
+              → <code>firebaseLocalStorage</code> → the <code>firebase:authUser:…</code> value.
+              Copy the <strong>refreshToken</strong> field (starts <code>AMf-</code>) — or just
+              copy the whole <code>stsTokenManager</code> object and paste it here; the app finds it.
+              <br />Pasting the <code>accessToken</code> (<code>eyJ…</code>) signs you in too, but only
+              for ~1 hour — the <strong>refreshToken</strong> is what keeps you signed in headlessly.
             </p>
           </form>
         </section>

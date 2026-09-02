@@ -10,8 +10,10 @@ import { openUserBrowser, readSessionFromBrowser } from "./chrome.js";
 import {
   clearTokenStore,
   freshToken,
-  hasRefreshCreds,
+  hasUsableToken,
+  ingestIdToken,
   ingestRefreshToken,
+  parsePastedCredential,
   tokenStatus,
 } from "./token-store.js";
 
@@ -298,7 +300,7 @@ export async function authStatus(force = false): Promise<AuthStatus> {
   //    mint a fresh ID token with no browser at all. This is the steady state -
   //    once captured (from Chrome or a paste), sign-in survives restarts for as
   //    long as the refresh token is valid, and we never launch a browser again.
-  if (hasRefreshCreds()) {
+  if (hasUsableToken()) {
     const token = await freshToken();
     const ts = tokenStatus();
     const status: AuthStatus = {
@@ -456,7 +458,7 @@ export async function authStatus(force = false): Promise<AuthStatus> {
  * reading a browser (which also captures a refresh token for next time).
  */
 export async function idToken(): Promise<string | null> {
-  if (hasRefreshCreds()) {
+  if (hasUsableToken()) {
     const t = await freshToken();
     if (t) return t;
   }
@@ -466,20 +468,58 @@ export async function idToken(): Promise<string | null> {
 }
 
 /**
- * Store a Firebase refresh token pasted by the user (the zero-browser route).
- * The API key defaults to AfterQuery's public one.
+ * Sign in from whatever the user pasted (the zero-browser route).
+ *
+ * Accepts a refresh token, an accessToken (ID token), or the whole
+ * `stsTokenManager` / auth record object. A refresh token gives a lasting,
+ * self-renewing session; a bare accessToken signs in only until it expires
+ * (~1h), so we say so and nudge toward the refresh token.
  */
-export async function ingestPastedRefreshToken(
-  refreshToken: string,
-  apiKey?: string,
-): Promise<AuthStatus> {
-  const res = await ingestRefreshToken(refreshToken, apiKey);
+export async function ingestPastedCredential(raw: string, apiKey?: string): Promise<AuthStatus> {
   cached = null;
-  const status = await authStatus(true);
-  if (!res.ok && status.reason !== "ok") {
-    status.detail = res.error ?? status.detail;
+  const parsed = parsePastedCredential(raw);
+
+  // Prefer the refresh token - it is the only path to a durable session.
+  if (parsed.refreshToken) {
+    const res = await ingestRefreshToken(parsed.refreshToken, apiKey);
+    const status = await authStatus(true);
+    if (!res.ok && status.reason !== "ok") status.detail = res.error ?? status.detail;
+    return status;
   }
-  return status;
+
+  // Only an accessToken was pasted: usable now, but temporary.
+  if (parsed.idToken) {
+    const res = ingestIdToken(parsed.idToken);
+    if (!res.ok) {
+      return {
+        signedIn: false,
+        email: null,
+        displayName: null,
+        hasProfile: hasProfile(),
+        via: "refresh-token",
+        reason: "error",
+        checkedAt: new Date().toISOString(),
+        detail: res.error,
+      };
+    }
+    const status = await authStatus(true);
+    const mins = res.exp ? Math.max(0, Math.round((res.exp * 1000 - Date.now()) / 60000)) : 0;
+    status.detail =
+      `signed in with a pasted access token — expires in ~${mins} min and cannot ` +
+      `renew itself. For a lasting session, paste the refreshToken instead.`;
+    return status;
+  }
+
+  return {
+    signedIn: false,
+    email: null,
+    displayName: null,
+    hasProfile: hasProfile(),
+    via: "refresh-token",
+    reason: "error",
+    checkedAt: new Date().toISOString(),
+    detail: "could not find a token in what you pasted",
+  };
 }
 
 /**

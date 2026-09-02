@@ -178,6 +178,83 @@ export async function exchange(): Promise<string | null> {
   }
 }
 
+/* ------------------------------ paste parsing ------------------------------ */
+
+const looksLikeJwt = (t: string): boolean =>
+  /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(t.trim());
+
+/** Recursively pull refreshToken / accessToken out of a parsed object. */
+function deepFindTokens(o: unknown, out: { refreshToken?: string; idToken?: string }): void {
+  if (!o || typeof o !== "object") return;
+  for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+    if (typeof v === "string") {
+      if (k === "refreshToken" && v) out.refreshToken ??= v;
+      if ((k === "accessToken" || k === "idToken") && v) out.idToken ??= v;
+    } else {
+      deepFindTokens(v, out);
+    }
+  }
+}
+
+/**
+ * Work out what the user pasted. Accepts, in order of preference:
+ *  - a JSON blob (the whole `stsTokenManager`, the authUser record, or an
+ *    IndexedDB row) — we deep-search it for refreshToken / accessToken;
+ *  - a bare refresh token (opaque string, e.g. "AMf-…");
+ *  - a bare ID/access token (a JWT, "eyJ…").
+ */
+export function parsePastedCredential(raw: string): {
+  refreshToken?: string;
+  idToken?: string;
+} {
+  const trimmed = raw.trim().replace(/^["']|["']$/g, "");
+  if (!trimmed) return {};
+
+  // JSON object/array?
+  if (/^[[{]/.test(trimmed)) {
+    try {
+      const found: { refreshToken?: string; idToken?: string } = {};
+      deepFindTokens(JSON.parse(trimmed), found);
+      if (found.refreshToken || found.idToken) return found;
+    } catch {
+      /* fall through to string handling */
+    }
+  }
+
+  // A JWT is an ID/access token; anything else we treat as a refresh token.
+  return looksLikeJwt(trimmed)
+    ? { idToken: trimmed }
+    : { refreshToken: trimmed.replace(/\s+/g, "") };
+}
+
+/**
+ * Store a bare ID token (accessToken) directly.
+ *
+ * This has no refresh token, so it works only until the token expires (~1h) and
+ * cannot renew itself. We accept it so a paste of the accessToken still signs
+ * you in, but the caller should nudge the user toward the refresh token for a
+ * lasting, headless session.
+ */
+export function ingestIdToken(idToken: string): {
+  ok: boolean;
+  error?: string;
+  email?: string | null;
+  exp?: number | null;
+} {
+  load();
+  const { exp, email } = decodeJwt(idToken);
+  if (!exp) return { ok: false, error: "that does not look like a valid token" };
+  if (exp * 1000 <= Date.now()) {
+    return { ok: false, error: "that token has already expired - grab a fresh one" };
+  }
+  state.idToken = idToken;
+  state.exp = exp;
+  state.email = email ?? state.email;
+  state.lastError = null;
+  scheduleRefresh(null); // nothing to refresh from
+  return { ok: true, email: state.email, exp };
+}
+
 /* ---------------------------------- API ---------------------------------- */
 
 /** Store a refresh token + API key, exchange immediately, and persist. */
@@ -216,6 +293,13 @@ export async function freshToken(): Promise<string | null> {
 export function hasRefreshCreds(): boolean {
   load();
   return Boolean(state.refreshToken && state.apiKey);
+}
+
+/** A valid ID token is present (from a refresh exchange or a direct paste). */
+export function hasUsableToken(): boolean {
+  load();
+  if (state.refreshToken && state.apiKey) return true;
+  return Boolean(state.idToken && state.exp && state.exp * 1000 > Date.now());
 }
 
 export function tokenStatus(): {

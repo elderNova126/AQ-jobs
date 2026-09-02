@@ -8,7 +8,7 @@ import { fetchExpertsBoard } from "./experts/client.js";
 import {
   authStatus,
   idToken,
-  ingestPastedRefreshToken,
+  ingestPastedCredential,
   signInInteractive,
   signOut,
 } from "./experts/session.js";
@@ -205,7 +205,7 @@ app.post("/api/auth/refresh-token", async (req, res) => {
     res.status(400).json({ error: "refreshToken is required" });
     return;
   }
-  const status = await ingestPastedRefreshToken(body.refreshToken, body.apiKey);
+  const status = await ingestPastedCredential(body.refreshToken, body.apiKey);
   emit({ kind: "auth-done", status });
   if (status.signedIn) {
     try {
