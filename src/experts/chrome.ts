@@ -253,9 +253,10 @@ export async function readSessionFromBrowser(browser: Browser): Promise<{
   email: string | null;
   displayName: string | null;
   token: string | null;
+  refreshToken: string | null;
 }> {
   const ctx = browser.contexts()[0];
-  if (!ctx) return { email: null, displayName: null, token: null };
+  if (!ctx) return { email: null, displayName: null, token: null, refreshToken: null };
 
   let page = ctx.pages().find((p) => p.url().startsWith(CONFIG.experts.origin));
   const opened = !page;
@@ -311,15 +312,17 @@ export async function readSessionFromBrowser(browser: Browser): Promise<{
         }
       });
 
-      if (!rec) return { email: null, displayName: null, token: null };
+      if (!rec) return { email: null, displayName: null, token: null, refreshToken: null };
       const sts = rec.stsTokenManager as
-        | { accessToken?: string; expirationTime?: number }
+        | { accessToken?: string; refreshToken?: string; expirationTime?: number }
         | undefined;
       return {
         email: (rec.email as string) ?? null,
         displayName: (rec.displayName as string) ?? null,
         token:
           sts?.accessToken && (sts.expirationTime ?? 0) > Date.now() ? sts.accessToken : null,
+        // The long-lived refresh token - the whole point of reading the browser.
+        refreshToken: sts?.refreshToken ?? null,
       };
     });
   } finally {

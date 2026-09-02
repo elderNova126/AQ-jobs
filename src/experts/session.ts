@@ -7,6 +7,13 @@ import { CONFIG } from "../config.js";
 import { CHROME_UA } from "../ashby/client.js";
 import { NAME_SHIM, errMsg } from "../util.js";
 import { openUserBrowser, readSessionFromBrowser } from "./chrome.js";
+import {
+  clearTokenStore,
+  freshToken,
+  hasRefreshCreds,
+  ingestRefreshToken,
+  tokenStatus,
+} from "./token-store.js";
 
 /**
  * Signed-in state for experts.afterquery.com.
@@ -43,7 +50,7 @@ export interface AuthStatus {
   /** True when a profile directory exists, whether or not it is still valid. */
   hasProfile: boolean;
   /** Where the answer came from, so the UI can explain itself. */
-  via: "my-chrome" | "your-browser" | "agent-profile" | null;
+  via: "refresh-token" | "my-chrome" | "your-browser" | "agent-profile" | null;
   /** Why we are not signed in, when we are not. */
   reason: "ok" | "never-signed-in" | "signed-out" | "error";
   checkedAt: string;
@@ -133,7 +140,7 @@ async function openProfile(headless: boolean): Promise<BrowserContext> {
  */
 async function readAuth(
   page: Page,
-): Promise<{ user: FirebaseUserLite | null; token: string | null }> {
+): Promise<{ user: FirebaseUserLite | null; token: string | null; refreshToken: string | null }> {
   // Written as a flat body with no inner named functions on purpose. esbuild
   // rewrites `const f = () => {}` into `__name(() => {}, "f")`, and that helper
   // does not exist inside the page - see NAME_SHIM in util.ts. Keeping this
@@ -179,10 +186,10 @@ async function readAuth(
       }
     });
 
-    if (!rec) return { user: null, token: null };
+    if (!rec) return { user: null, token: null, refreshToken: null };
 
     const sts = rec.stsTokenManager as
-      | { accessToken?: string; expirationTime?: number }
+      | { accessToken?: string; refreshToken?: string; expirationTime?: number }
       | undefined;
 
     return {
@@ -190,11 +197,30 @@ async function readAuth(
         email: (rec.email as string) ?? null,
         displayName: (rec.displayName as string) ?? null,
       },
-      // Only hand back a token that is actually still valid.
+      // Only hand back an ID token that is actually still valid...
       token:
         sts?.accessToken && (sts.expirationTime ?? 0) > Date.now() ? sts.accessToken : null,
+      // ...but always grab the refresh token: it is long-lived and lets us mint
+      // fresh ID tokens headlessly from here on, with no browser.
+      refreshToken: sts?.refreshToken ?? null,
     };
   });
+}
+
+/**
+ * Hand a captured refresh token to the headless token store.
+ *
+ * This is the payoff of every browser read: once we have the refresh token, the
+ * agent never needs a browser again to stay signed in - it mints ID tokens
+ * directly from Google's secure-token endpoint.
+ */
+async function captureRefreshToken(refreshToken: string | null): Promise<void> {
+  if (!refreshToken) return;
+  try {
+    await ingestRefreshToken(refreshToken, CONFIG.experts.firebaseApiKey);
+  } catch (err) {
+    console.warn(`[experts] could not store refresh token: ${errMsg(err)}`);
+  }
 }
 
 /**
@@ -268,13 +294,43 @@ export async function authStatus(force = false): Promise<AuthStatus> {
     checkedAt: new Date().toISOString(),
   };
 
-  // 0. "Use my Chrome": launch the user's own Chrome profile and read the live
-  //    session over CDP. This is the route that reuses an existing Google login.
+  // 0. Headless refresh-token: if we have ever captured a refresh token, we can
+  //    mint a fresh ID token with no browser at all. This is the steady state -
+  //    once captured (from Chrome or a paste), sign-in survives restarts for as
+  //    long as the refresh token is valid, and we never launch a browser again.
+  if (hasRefreshCreds()) {
+    const token = await freshToken();
+    const ts = tokenStatus();
+    const status: AuthStatus = {
+      ...base,
+      via: "refresh-token",
+      signedIn: Boolean(token),
+      email: ts.email,
+      displayName: null,
+      reason: token ? "ok" : ts.lastError ? "error" : "signed-out",
+      detail: token
+        ? "signed in headlessly via a stored refresh token (no browser needed)"
+        : ts.lastError
+          ? `stored refresh token failed: ${ts.lastError} - re-capture it`
+          : "stored refresh token is no longer valid - re-capture it",
+    };
+    cached = { status, token, at: Date.now() };
+    // A valid headless token is the ideal state; only fall through to browser
+    // routes when it has genuinely stopped working.
+    if (token) return status;
+  }
+
+  // 0b. "Use my Chrome": launch the user's own Chrome profile and read the live
+  //    session over CDP. Used to CAPTURE the refresh token the first time.
   if (CONFIG.experts.useMyChrome || CONFIG.experts.chromeCdpUrl) {
     let handle: Awaited<ReturnType<typeof openUserBrowser>> | null = null;
     try {
       handle = await openUserBrowser();
-      const { email, displayName, token } = await readSessionFromBrowser(handle.browser);
+      const { email, displayName, token, refreshToken } = await readSessionFromBrowser(
+        handle.browser,
+      );
+      // Capture the refresh token so subsequent runs are fully headless.
+      if (email) await captureRefreshToken(refreshToken);
       const status: AuthStatus = {
         ...base,
         via: "my-chrome",
@@ -283,7 +339,9 @@ export async function authStatus(force = false): Promise<AuthStatus> {
         displayName: displayName ?? null,
         reason: email ? "ok" : "signed-out",
         detail: email
-          ? "read live from your own Chrome"
+          ? refreshToken
+            ? "read from your Chrome and stored for headless refresh (no browser needed next time)"
+            : "read live from your own Chrome"
           : "opened your Chrome, but that profile is not signed in to AfterQuery Experts",
       };
       cached = { status, token, at: Date.now() };
@@ -307,7 +365,8 @@ export async function authStatus(force = false): Promise<AuthStatus> {
   if (attached) {
     try {
       const page = await expertsPage(attached.ctx, true);
-      const { user, token } = await readAuth(page);
+      const { user, token, refreshToken } = await readAuth(page);
+      if (user?.email) await captureRefreshToken(refreshToken);
       const status: AuthStatus = {
         ...base,
         via: "your-browser",
@@ -358,7 +417,8 @@ export async function authStatus(force = false): Promise<AuthStatus> {
   try {
     ctx = await openProfile(true);
     const page = await expertsPage(ctx, true);
-    const { user, token } = await readAuth(page);
+    const { user, token, refreshToken } = await readAuth(page);
+    if (user?.email) await captureRefreshToken(refreshToken);
     const status: AuthStatus = {
       ...base,
       via: "agent-profile",
@@ -388,11 +448,38 @@ export async function authStatus(force = false): Promise<AuthStatus> {
   }
 }
 
-/** A usable Firebase ID token, or null when not signed in. */
+/**
+ * A usable Firebase ID token, or null when not signed in.
+ *
+ * Headless first: if a refresh token is stored, mint from it directly - no
+ * browser, no cache-staleness games. Only if that is absent do we fall back to
+ * reading a browser (which also captures a refresh token for next time).
+ */
 export async function idToken(): Promise<string | null> {
+  if (hasRefreshCreds()) {
+    const t = await freshToken();
+    if (t) return t;
+  }
   if (cached && cached.token && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token;
   await authStatus(true);
   return cached?.token ?? null;
+}
+
+/**
+ * Store a Firebase refresh token pasted by the user (the zero-browser route).
+ * The API key defaults to AfterQuery's public one.
+ */
+export async function ingestPastedRefreshToken(
+  refreshToken: string,
+  apiKey?: string,
+): Promise<AuthStatus> {
+  const res = await ingestRefreshToken(refreshToken, apiKey);
+  cached = null;
+  const status = await authStatus(true);
+  if (!res.ok && status.reason !== "ok") {
+    status.detail = res.error ?? status.detail;
+  }
+  return status;
 }
 
 /**
@@ -418,10 +505,11 @@ export async function signInInteractive(
 
     step("waiting for you to sign in with Google (complete it in the window)");
     const deadline = Date.now() + CONFIG.experts.signInTimeoutMs;
-    let seen: { user: FirebaseUserLite | null; token: string | null } = {
-      user: null,
-      token: null,
-    };
+    let seen: {
+      user: FirebaseUserLite | null;
+      token: string | null;
+      refreshToken: string | null;
+    } = { user: null, token: null, refreshToken: null };
 
     while (Date.now() < deadline) {
       if (ctx.pages().length === 0) break; // user closed the window
@@ -429,7 +517,10 @@ export async function signInInteractive(
         const active = ctx.pages().find((p) => p.url().includes("afterquery.com"));
         if (active) {
           seen = await readAuth(active);
-          if (seen.user?.email) break;
+          if (seen.user?.email) {
+            await captureRefreshToken(seen.refreshToken);
+            break;
+          }
         }
       } catch {
         /* mid-navigation; try again */
@@ -473,5 +564,6 @@ export async function signInInteractive(
 /** Forget the session by deleting the browser profile. */
 export async function signOut(): Promise<void> {
   cached = null;
+  clearTokenStore();
   await fs.promises.rm(CONFIG.experts.profileDir, { recursive: true, force: true });
 }

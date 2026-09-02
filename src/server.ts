@@ -8,6 +8,7 @@ import { fetchExpertsBoard } from "./experts/client.js";
 import {
   authStatus,
   idToken,
+  ingestPastedRefreshToken,
   signInInteractive,
   signOut,
 } from "./experts/session.js";
@@ -191,6 +192,29 @@ app.post("/api/auth/signin", async (_req, res) => {
   } finally {
     signingIn = false;
   }
+});
+
+/**
+ * Paste a Firebase refresh token (zero-browser route). With it the agent mints
+ * fresh ID tokens forever via Google's secure-token endpoint. The API key
+ * defaults to AfterQuery's public one; advanced users can override it.
+ */
+app.post("/api/auth/refresh-token", async (req, res) => {
+  const body = req.body as { refreshToken?: string; apiKey?: string };
+  if (!body.refreshToken?.trim()) {
+    res.status(400).json({ error: "refreshToken is required" });
+    return;
+  }
+  const status = await ingestPastedRefreshToken(body.refreshToken, body.apiKey);
+  emit({ kind: "auth-done", status });
+  if (status.signedIn) {
+    try {
+      await syncJobs();
+    } catch (err) {
+      console.warn(`[auth] post-paste sync failed: ${errMsg(err)}`);
+    }
+  }
+  res.status(status.signedIn ? 200 : 502).json(status);
 });
 
 app.post("/api/auth/signout", async (_req, res) => {

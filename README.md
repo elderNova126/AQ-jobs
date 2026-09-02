@@ -47,6 +47,20 @@ is present, so a signed-in fetch could return a personalised set. The agent
 passes your ID token whenever you are signed in and falls back to the anonymous
 listing otherwise.
 
+### The steady state: one capture, then headless forever
+
+However you first sign in, the agent captures the session's **Firebase refresh
+token** and stores it (`data/experts-auth.json`, 0600, gitignored). From then on
+it mints fresh ID tokens directly from Google's secure-token endpoint —
+**no browser, across restarts, for as long as the token stays valid (weeks).**
+The `Use my Chrome` / sign-in routes below are really just ways to *capture* that
+token once; after that, sign-in shows as `via a stored refresh token (headless)`.
+
+If you already have a refresh token (e.g. from your browser's DevTools →
+Application → IndexedDB → `firebaseLocalStorageDb` → `stsTokenManager.refreshToken`),
+you can skip the browser entirely: click **Paste refresh token** and store it.
+This is the same mechanism the companion `bot_o` project uses.
+
 ### Why the app can't see the login in your own browser
 
 If you are signed in to AfterQuery in Chrome and then open `localhost:5173`, the
@@ -279,6 +293,7 @@ All optional except the API key — see [`.env.example`](.env.example).
 | `AQ_APPLY_CONCURRENCY` | `2` | Parallel browser workers in a bulk run |
 | `AQ_HEADFUL` | `0` | `1` = show the Chrome window while applying |
 | `AQ_EXPERTS` | `1` | `0` skips the Experts board entirely |
+| `AQ_FIREBASE_API_KEY` | AfterQuery's | Public Firebase key for the headless refresh-token exchange |
 | `AQ_USE_MY_CHROME` | `0` | `1` reads your login from your own Chrome profile (also a UI button) |
 | `AQ_CHROME_PROFILE` | auto | Which Chrome profile holds your login, e.g. `Default`, `Profile 1` |
 | `AQ_CHROME_PATH` / `AQ_CHROME_USER_DATA_DIR` | auto | Overrides if Chrome is in a non-standard location |
@@ -305,7 +320,8 @@ src/
     client.ts          board API, GraphQL transport, resume upload
   experts/
     client.ts          Experts listings -> Job, with optional bearer token
-    session.ts         auth status across all three routes + Firebase ID token
+    session.ts         auth status/capture across every route + Firebase ID token
+    token-store.ts     headless refresh-token -> ID token exchange (the steady state)
     chrome.ts          "Use my Chrome": profile discovery, launch, CDP read
   resume/
     extract.ts         PDF/DOCX/TXT -> text, identity scraping

@@ -206,7 +206,8 @@ function renderAuthCard() {
 
   if (a.signedIn) {
     const via =
-      a.via === "my-chrome" ? "your Chrome"
+      a.via === "refresh-token" ? "a stored refresh token (headless)"
+      : a.via === "my-chrome" ? "your Chrome"
       : a.via === "your-browser" ? "your attached Chrome"
       : "the agent's own profile";
     chip.textContent = "signed in";
@@ -911,6 +912,39 @@ function wire() {
 
   $("useChromeBtn").addEventListener("click", runUseChrome);
   $("agentSignInBtn").addEventListener("click", () => $("authBtn").click());
+
+  $("pasteTokenBtn").addEventListener("click", () => {
+    const f = $("pasteForm");
+    f.hidden = !f.hidden;
+    if (!f.hidden) f.refreshToken.focus();
+  });
+  $("pasteCancel").addEventListener("click", () => { $("pasteForm").hidden = true; });
+  $("pasteForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const refreshToken = f.refreshToken.value.trim();
+    if (!refreshToken) { toast("Paste a refresh token first", "err"); return; }
+    log("storing refresh token…");
+    try {
+      const st = await api("/api/auth/refresh-token", {
+        method: "POST",
+        body: JSON.stringify({ refreshToken, apiKey: f.apiKey.value.trim() || undefined }),
+      });
+      if (st.signedIn) {
+        toast(`Signed in as ${st.email} — headless, no browser needed`, "ok");
+        log(`refresh token stored: ${st.email}`, "ok");
+        f.reset();
+        $("pasteForm").hidden = true;
+      } else {
+        toast(st.detail || "Token rejected", "err");
+        log(st.detail || "refresh token rejected", "err");
+      }
+      await loadState();
+    } catch (err) {
+      toast(err.message, "err");
+      log(`paste failed: ${err.message}`, "err");
+    }
+  });
 
   $("sourceFilter").addEventListener("change", (e) => {
     state.filters.source = e.target.value;

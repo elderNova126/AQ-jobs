@@ -52,8 +52,27 @@
           <div class="authbtns" id="authBtns" hidden>
             <button class="btn btn-primary" id="useChromeBtn">Use my Chrome login</button>
             <button class="btn" id="agentSignInBtn">Sign in separately</button>
+            <button class="btn" id="pasteTokenBtn">Paste refresh token</button>
           </div>
           <p class="hint small" id="chromeDetail" hidden></p>
+          <form class="form" id="pasteForm" hidden>
+            <label>Firebase refresh token
+              <input name="refreshToken" placeholder="paste the long token from your session" autocomplete="off" />
+            </label>
+            <label>Web API key <span class="muted">(optional — defaults to AfterQuery's)</span>
+              <input name="apiKey" placeholder="AIza…" autocomplete="off" />
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">Store &amp; stay signed in</button>
+              <button class="btn" type="button" id="pasteCancel">Cancel</button>
+            </div>
+            <p class="hint small">
+              Once stored, the agent stays signed in with no browser — it mints
+              fresh tokens automatically, even after a restart. Get the token from
+              your browser DevTools → Application → IndexedDB →
+              <code>firebaseLocalStorageDb</code> → the <code>stsTokenManager.refreshToken</code> value.
+            </p>
+          </form>
         </section>
 
         <section class="card" id="identityCard" hidden>

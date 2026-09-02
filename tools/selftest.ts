@@ -18,6 +18,7 @@ import { fetchBoard, openApplicationForm, visibleFieldEntries } from "../src/ash
 import { fetchExpertsBoard } from "../src/experts/client.js";
 import { NAME_SHIM } from "../src/util.js";
 import { describeUserChrome } from "../src/experts/chrome.js";
+import { ingestRefreshToken, freshToken, clearTokenStore } from "../src/experts/token-store.js";
 import { chromium } from "playwright";
 import { htmlToText, mapLimit, verdictOf } from "../src/util.js";
 import type { AshbyFieldDef, Resume } from "../src/types.js";
@@ -289,6 +290,16 @@ async function main(): Promise<void> {
       `       (chrome ${info.available ? "found" : "not found"}, ` +
         `${info.profiles.length} profiles, ${withLogin} with an AfterQuery login)`,
     );
+  });
+
+  console.log("\n== headless refresh-token store (offline, no real token) ==");
+
+  await test("a bad refresh token is rejected cleanly and nothing persists", async () => {
+    const r = await ingestRefreshToken("not-a-real-refresh-token", undefined);
+    assert.equal(r.ok, false, "a bogus token must not succeed");
+    assert.ok(r.error, "a failure must carry an error message");
+    assert.equal(await freshToken(), null, "no token should be mintable from a bad refresh token");
+    clearTokenStore();
   });
 
   console.log("\n== live contract against AfterQuery's board ==");

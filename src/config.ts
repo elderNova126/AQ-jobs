@@ -104,6 +104,16 @@ export const CONFIG = {
     signInTimeoutMs: num(process.env.AQ_SIGNIN_TIMEOUT_MS, 5 * 60 * 1000),
     /** 0 disables pulling the Experts board entirely. */
     enabled: process.env.AQ_EXPERTS !== "0",
+    /**
+     * AfterQuery's public Firebase Web API key, used to exchange a refresh token
+     * for fresh ID tokens at securetoken.googleapis.com. Public (it ships in
+     * their frontend), stable, and overridable. This is what makes signed-in
+     * state survive headlessly, with no browser, across restarts.
+     */
+    firebaseApiKey:
+      process.env.AQ_FIREBASE_API_KEY ?? "AIzaSyBk8ZcYp3QaFiOqxC9haN99InPLHUC1HIk",
+    /** Where the captured refresh token + API key persist (0600, gitignored). */
+    authStoreFile: path.join(ROOT, "data", "experts-auth.json"),
   },
 
   llm: {
