@@ -424,3 +424,18 @@ table.kv td { word-break: break-word; }
   border-color: color-mix(in srgb, #a371f7 45%, var(--border));
 }
 .pool { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+
+/* ---------------- sign-in explainer ---------------- */
+
+.authnote {
+  margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-dim);
+  padding: 10px 11px; border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border));
+}
+.authnote strong { color: var(--text); font-weight: 600; }
+.authnote code {
+  font-family: var(--mono); font-size: 11px;
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--bg); border: 1px solid var(--border-soft);
+}

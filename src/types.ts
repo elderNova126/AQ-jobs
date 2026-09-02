@@ -270,6 +270,8 @@ export type ProgressEvent =
         email: string | null;
         displayName: string | null;
         hasProfile: boolean;
+        via: "your-browser" | "agent-profile" | null;
+        reason: "ok" | "never-signed-in" | "signed-out" | "error";
         checkedAt: string;
         detail?: string;
       };

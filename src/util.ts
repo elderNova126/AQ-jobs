@@ -108,3 +108,19 @@ export function verdictOf(score: number): "strong" | "good" | "moderate" | "weak
   if (score >= 45) return "moderate";
   return "weak";
 }
+
+/**
+ * Shim installed into every page we drive with Playwright.
+ *
+ * tsx/esbuild rewrites `const f = () => {}` into `const f = __name(() => {}, "f")`
+ * to preserve function names. When such a body is serialised into the browser by
+ * `page.evaluate`, that helper does not exist there and the call dies with
+ * `ReferenceError: __name is not defined`. Worse, it fails where the result is
+ * interpreted rather than thrown - a session read came back "signed out" instead
+ * of erroring, which is how it went unnoticed.
+ *
+ * Defining a no-op keeps in-page code immune to the transform, so future edits
+ * cannot silently reintroduce the bug. It must stay a plain string: anything
+ * compiled would be subject to the very transform it is guarding against.
+ */
+export const NAME_SHIM = "globalThis.__name = globalThis.__name || function (f) { return f; };";

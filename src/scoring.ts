@@ -190,6 +190,7 @@ async function llmScore(resume: Resume, job: Job): Promise<Score> {
     cachedSystem: `CANDIDATE RESUME\n================\n${truncate(resume.text, 60_000)}${profileBlock}`,
     user: `Score this candidate against the following job.\n\n${jobPrompt(job)}`,
     maxTokens: 3000,
+    effort: "low",
   });
 
   const score = clamp(Math.round(parsed.score), 0, 100);

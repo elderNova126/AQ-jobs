@@ -67,6 +67,25 @@ export const CONFIG = {
      * refresh token in IndexedDB, which storageState does not capture.
      */
     profileDir: path.join(ROOT, "data", "experts-profile"),
+    /**
+     * Browser to drive for the Experts session. Blank auto-detects a real
+     * installed Chrome, then Edge, then falls back to bundled Chromium.
+     * Google often refuses OAuth from bundled Chromium, so a real browser
+     * matters for the interactive sign-in.
+     */
+    browserChannel: process.env.AQ_BROWSER_CHANNEL ?? "",
+    /**
+     * Optional: attach to a Chrome you are already signed into, instead of the
+     * agent keeping its own profile.
+     *
+     * A page served from localhost can never read experts.afterquery.com's
+     * Firebase session - that is the same-origin policy, not something we can
+     * work around - so by default the agent signs in once in its own profile.
+     * If you would rather it used the browser you already use, start Chrome with
+     *     chrome --remote-debugging-port=9222
+     * and set AQ_CHROME_CDP=http://localhost:9222.
+     */
+    chromeCdpUrl: process.env.AQ_CHROME_CDP ?? "",
     /** How long the interactive sign-in window waits for the user. */
     signInTimeoutMs: num(process.env.AQ_SIGNIN_TIMEOUT_MS, 5 * 60 * 1000),
     /** 0 disables pulling the Experts board entirely. */
@@ -93,6 +112,15 @@ export const CONFIG = {
      * score and are labelled as such in the UI. 0 means "no limit".
      */
     scoreLimit: num(process.env.AQ_SCORE_LIMIT, 80),
+    /**
+     * Default reasoning effort for OpenAI models. Individual call sites
+     * override it - scoring runs cheap, answering runs careful.
+     */
+    effort: (process.env.AQ_EFFORT ?? "low") as
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high",
   },
 
   apply: {

@@ -192,6 +192,8 @@ app.get("/api/state", async (_req, res) => {
     llmReady: llm.ok,
     llmDetail: llm.detail,
     auth,
+    /** Whether to suggest the attach-to-your-Chrome route in the UI. */
+    cdpHint: CONFIG.experts.chromeCdpUrl === "",
     counts: {
       ashby: jobs.filter((j) => j.source === "ashby").length,
       experts: jobs.filter((j) => j.source === "experts").length,

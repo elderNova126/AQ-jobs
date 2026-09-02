@@ -2,7 +2,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { CONFIG } from "../config.js";
 import { ASHBY_OPS, type AshbyOpName } from "../ashby/gql-ops.js";
 import { AshbyError, CHROME_UA } from "../ashby/client.js";
-import { errMsg, humanPause, retry } from "../util.js";
+import { NAME_SHIM, errMsg, humanPause, retry } from "../util.js";
 
 /**
  * A real Chrome, driven for two reasons.
@@ -80,6 +80,9 @@ export class ApplySession {
       // Cut page weight without touching anything the form or captcha needs.
       serviceWorkers: "block",
     });
+
+    // Keep in-page code immune to esbuild's __name transform (see NAME_SHIM).
+    await ctx.addInitScript(NAME_SHIM);
 
     // Images and fonts are irrelevant to us; blocking them halves load time.
     await ctx.route("**/*", (route) => {

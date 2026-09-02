@@ -24,6 +24,7 @@ const state = {
   filters: { q: "", dept: "", source: "", sort: "score" },
   auth: { signedIn: false, email: null, hasProfile: false, detail: "" },
   counts: { ashby: 0, experts: 0 },
+  cdpHint: true,
   signingIn: false,
   scoring: null,
   applyRun: null,
@@ -107,6 +108,7 @@ async function loadState() {
   state.applications = s.applications;
   state.jobsSyncedAt = s.jobsSyncedAt;
   state.auth = s.auth ?? state.auth;
+  state.cdpHint = s.cdpHint ?? state.cdpHint;
   state.counts = s.counts ?? state.counts;
   state.llmDetail = s.llmDetail ?? "";
 
@@ -160,28 +162,51 @@ function renderAuth() {
   const a = state.auth;
   const pill = $("authPill");
   const btn = $("authBtn");
+  const note = $("authNote");
 
   if (state.signingIn) {
     pill.textContent = "Experts: signing in…";
     pill.className = "pill";
     btn.disabled = true;
     btn.textContent = "Waiting…";
+    if (note) note.hidden = true;
     return;
   }
 
   btn.disabled = false;
   if (a.signedIn) {
+    const where = a.via === "your-browser" ? "your browser" : "agent profile";
     pill.textContent = `Experts: ${a.email ?? "signed in"}`;
     pill.className = "pill pill-ok";
+    pill.title = `${a.detail ?? ""} (via ${where})`;
     btn.textContent = "Sign out";
-  } else {
-    pill.textContent = "Experts: not signed in";
-    pill.className = "pill pill-off";
-    btn.textContent = "Sign in";
+    if (note) note.hidden = true;
+    return;
   }
-  pill.title = a.detail
-    ? `${a.detail} — the 167 Experts roles are public; signing in lets the agent fetch them as you.`
-    : "Sign in to fetch the Experts board as your account.";
+
+  pill.textContent = "Experts: not signed in";
+  pill.className = "pill pill-off";
+  pill.title = a.detail ?? "";
+  btn.textContent = "Sign in";
+
+  // The single most confusing state in this app: the user is signed in *in
+  // their own browser* and reasonably expects that to count. It cannot - a page
+  // on localhost is not allowed to read another origin's session - so say so
+  // plainly instead of leaving "not signed in" looking like a bug.
+  if (note) {
+    note.hidden = false;
+    note.innerHTML =
+      `<strong>Signed in to AfterQuery in your own browser?</strong> That login is invisible here — ` +
+      `a page served from <code>localhost</code> is not allowed to read ` +
+      `<code>experts.afterquery.com</code>'s session (same-origin policy). ` +
+      `Click <strong>Sign in</strong> and the agent opens its own Chrome window for a one-time Google sign-in, ` +
+      `which it then remembers. ` +
+      (state.cdpHint
+        ? `Or attach it to the Chrome you already use: start Chrome with ` +
+          `<code>--remote-debugging-port=9222</code> and set <code>AQ_CHROME_CDP=http://localhost:9222</code>.`
+        : ``) +
+      `<br />All ${state.counts.experts} Experts roles are public either way — signing in only lets the agent fetch them as you.`;
+  }
 }
 
 function renderResumes() {

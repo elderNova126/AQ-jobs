@@ -47,6 +47,22 @@ is present, so a signed-in fetch could return a personalised set. The agent
 passes your ID token whenever you are signed in and falls back to the anonymous
 listing otherwise.
 
+### Why the app can't see the login in your own browser
+
+If you are signed in to AfterQuery in Chrome and then open `localhost:5173`, the
+agent will still say **not signed in**. That is correct, not a bug: a page served
+from `localhost` is not allowed to read `experts.afterquery.com`'s cookies or
+IndexedDB. Same-origin policy, no way around it. The agent needs a browser
+session *it* can read, which means one of two routes:
+
+| Route | Setup | Trade-off |
+|---|---|---|
+| **Agent's own profile** (default) | Click `Sign in`; a real Chrome window opens for a one-time Google sign-in | One extra sign-in, then remembered forever |
+| **Attach to your Chrome** | Start Chrome with `--remote-debugging-port=9222`, set `AQ_CHROME_CDP=http://localhost:9222` | Uses the session you already have; needs Chrome started with that flag |
+
+Either way all ~173 Experts roles are public, so nothing is blocked by being
+signed out — signing in only lets the agent fetch the listing *as you*.
+
 ### How sign-in works, and why it works that way
 
 Experts sign-in is **Google OAuth only** — Firebase Auth (project
@@ -67,6 +83,11 @@ complete Google sign-in (2FA, passkeys, consent screens all behave normally),
 and Chrome's own profile directory keeps the session — IndexedDB included —
 across restarts. Later runs read it headlessly and pull the Firebase ID token
 straight off the page.
+
+It launches your **real installed Chrome** (then Edge, then bundled Chromium as
+a last resort), because Google frequently refuses OAuth from Playwright's
+bundled Chromium with "this browser or app may not be secure". Override with
+`AQ_BROWSER_CHANNEL`.
 
 The profile lives in `data/experts-profile/` and is gitignored. `Sign out`
 deletes it.
@@ -240,11 +261,14 @@ All optional except the API key — see [`.env.example`](.env.example).
 | `AQ_LLM_PROVIDER` | `auto` | `openai`, `anthropic`, or auto-detect from the keys |
 | `AQ_MODEL` | provider default | `gpt-5` / `claude-opus-5`. On a bad value the server prints the models your key *can* use |
 | `AQ_SCORE_LIMIT` | `80` | Roles given a real LLM assessment per resume; `0` = all |
+| `AQ_EFFORT` | `low` | OpenAI reasoning effort for scoring; profile/answers force `medium` |
 | `AQ_SCORE_CONCURRENCY` | `6` | Parallel LLM calls while scoring |
 | `AQ_DRY_RUN` | `0` | `1` = fill and validate but never submit |
 | `AQ_APPLY_CONCURRENCY` | `2` | Parallel browser workers in a bulk run |
 | `AQ_HEADFUL` | `0` | `1` = show the Chrome window while applying |
 | `AQ_EXPERTS` | `1` | `0` skips the Experts board entirely |
+| `AQ_BROWSER_CHANNEL` | auto | Browser for the sign-in window: `chrome`, `msedge`, or blank to auto-detect |
+| `AQ_CHROME_CDP` | — | Attach to a Chrome you are already signed into, e.g. `http://localhost:9222` |
 | `AQ_SIGNIN_TIMEOUT_MS` | `300000` | How long the sign-in window waits for you |
 | `PORT` | `5173` | HTTP port |
 
@@ -278,6 +302,17 @@ tools/
   extract-ashby-ops.ts regenerate gql-ops.ts from the live bundle
   selftest.ts          36 checks incl. live contracts for both boards
 ```
+
+### A note on in-page code
+
+Anything passed to `page.evaluate` must avoid **named inner functions**. tsx's
+esbuild rewrites `const f = () => {}` into `__name(() => {}, "f")`, and that
+helper does not exist inside the browser — the call dies with
+`ReferenceError: __name is not defined`. This bit once: session detection failed
+that way and surfaced as a permanent "not signed in" rather than an error.
+`NAME_SHIM` in `src/util.ts` is installed into every context the agent owns, and
+`readAuth` is additionally written flat so it also works in a CDP-attached
+browser where we install nothing.
 
 ```
 npm run typecheck

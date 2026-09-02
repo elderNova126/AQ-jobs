@@ -61,6 +61,7 @@ export async function extractProfile(resumeText: string): Promise<ResumeProfile>
     cachedSystem: `RESUME\n=====\n${truncate(resumeText, 60_000)}`,
     user: "Extract the structured profile for this resume.",
     maxTokens: 4096,
+    effort: "medium",
   });
 
   return {

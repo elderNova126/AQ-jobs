@@ -362,6 +362,7 @@ async function resolveWithLlm(
       `Return one entry per fieldId above.`,
     ].join("\n"),
     maxTokens: 4096,
+    effort: "medium",
   });
 
   const out = new Map<string, { answer: string; rationale: string }>();

@@ -80,6 +80,15 @@ export interface AskArgs<T extends z.ZodType> {
   /** Volatile: the specific question (the job). */
   user: string;
   maxTokens?: number;
+  /**
+   * How hard the model should think.
+   *
+   * Matters a lot here: scoring runs the same bounded judgement 80 times, where
+   * "low" is several times faster and cheaper with no meaningful quality loss,
+   * while a wrong answer written onto a real job application is worth paying
+   * "medium" for. Set per call site rather than globally.
+   */
+  effort?: "minimal" | "low" | "medium" | "high";
 }
 
 export async function askStructured<T extends z.ZodType>(
