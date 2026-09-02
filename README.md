@@ -23,9 +23,18 @@ Both are scored against every resume and ranked in one list, so you see the
 best-matching AfterQuery work regardless of which board it lives on. Rows carry
 an `ashby` / `experts` badge and the board filter narrows to either.
 
-Automated submission is deliberately limited to Ashby. The Experts board is a
-different product with its own form engine and reCAPTCHA Enterprise flow, so
-the agent refuses to pretend it can file those rather than half-doing it.
+Every row shows two buttons on both boards:
+
+- **Ashby** — `Apply` runs the agent's fully automated submission; `Open ↗` opens
+  the posting.
+- **Experts** — `Apply ↗` opens that role's application form on
+  experts.afterquery.com (signed in, ready to submit); `Open ↗` opens the job
+  description.
+
+Automated *submission* is deliberately limited to Ashby. Experts applications are
+login-gated on their own site and filing one is irreversible on a live
+marketplace, so the agent scores and ranks those roles and takes you straight
+into the application, rather than blind-submitting something it cannot verify.
 
 ### Does signing in reveal more jobs?
 
@@ -251,6 +260,17 @@ dropdowns under **Applicant details → Optional & work authorization** once.
 - **Activity** — live progress over SSE, step by step, per job.
 
 ---
+
+## Token usage
+
+The header shows a live **token pill** (e.g. `13.2k tok · ~$0.08`) — exact input/
+output tokens used this session (hover for the breakdown, including cache hits),
+plus a cost *estimate*. Token counts are exact; the dollar figure uses the
+per-1M rates `AQ_PRICE_IN` / `AQ_PRICE_OUT` in `.env` (defaults ballpark gpt-5).
+
+Scoring is the main spend: ~$0.02/role on gpt-5, so scoring one resume against
+the default top-80 is roughly $1–2. Lower `AQ_SCORE_LIMIT` (or `AQ_EFFORT`) to
+spend less; the heuristic still ranks every role for free.
 
 ## Safety
 

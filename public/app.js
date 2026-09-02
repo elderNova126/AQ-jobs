@@ -27,6 +27,7 @@ const state = {
   signingIn: false,
   scoring: null,
   applyRun: null,
+  usage: null,
 };
 
 /* ------------------------------ helpers ------------------------------ */
@@ -109,6 +110,7 @@ async function loadState() {
   state.auth = s.auth ?? state.auth;
   state.counts = s.counts ?? state.counts;
   state.llmDetail = s.llmDetail ?? "";
+  state.usage = s.usage ?? state.usage;
 
   if (!state.selectedResumeId || !state.resumes.some((r) => r.id === state.selectedResumeId)) {
     const primary = state.resumes.find((r) => r.isPrimary) ?? state.resumes[0];
@@ -147,6 +149,25 @@ function renderTop() {
     : "Set OPENAI_API_KEY in .env for real match scoring and question answering.";
 
   $("dryRunPill").hidden = !state.dryRun;
+
+  const u = state.usage;
+  const up = $("usagePill");
+  if (u && u.calls > 0) {
+    const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+    const cost = u.priced && u.estCostUsd > 0 ? ` · ~$${u.estCostUsd.toFixed(u.estCostUsd < 1 ? 4 : 2)}` : "";
+    up.hidden = false;
+    up.textContent = `${fmt(u.totalTokens)} tok${cost}`;
+    up.title =
+      `${u.calls} LLM calls this session
+` +
+      `input ${u.inputTokens.toLocaleString()} (${u.cachedInputTokens.toLocaleString()} cached)
+` +
+      `output ${u.outputTokens.toLocaleString()}
+` +
+      (u.priced ? `estimated cost ~$${u.estCostUsd} (rates in .env: AQ_PRICE_IN/OUT)` : "set AQ_PRICE_IN/OUT for a cost estimate");
+  } else {
+    up.hidden = true;
+  }
 
   const when = state.jobsSyncedAt ? new Date(state.jobsSyncedAt).toLocaleString() : "never";
   const c = state.counts;
@@ -373,26 +394,40 @@ function renderJobs() {
       statusCell = `<span class="status st-idle">—</span>`;
     }
 
-    // Automated submission is Ashby-only; Experts roles link out to their site.
+    // Both boards get Apply + Open.
+    //  - Ashby: Apply is the agent's automated submission; Open ↗ is the posting.
+    //  - Experts: applications are login-gated on their own site and submitting
+    //    is irreversible, so Apply opens the application form (signed in) for you
+    //    to submit; Open ↗ is the job description.
     const isExperts = job.source === "experts";
-    const canApply = Boolean(r?.ready) && !runningStep && !state.applyRun;
-    const applyLabel = app?.status === "submitted" ? "Re-apply" : "Apply";
-    const applyTitle = !r
-      ? "Select a resume first"
-      : !r.ready
-        ? `Fill in: ${r.missing.join(", ")}`
-        : app?.status === "submitted"
-          ? "Already submitted - click to submit again"
-          : `Apply to ${job.title}`;
-
-    const actionCell = isExperts
-      ? `<a class="btn btn-apply" href="${esc(job.applyUrl)}" target="_blank" rel="noopener"
-            title="Automated apply covers the Ashby board only — opens experts.afterquery.com">Open ↗</a>`
-      : `<button class="btn btn-apply" data-apply ${canApply ? "" : "disabled"} title="${esc(applyTitle)}">
-            ${applyLabel}
-         </button>`;
-
     const badge = `<span class="srcbadge srcbadge-${job.source}">${isExperts ? "experts" : "ashby"}</span>`;
+
+    let actionCell;
+    if (isExperts) {
+      const applied = app?.status === "submitted";
+      actionCell = `
+        <div class="rowbtns">
+          <a class="btn btn-apply" data-open-apply href="${esc(job.applyUrl)}" target="_blank" rel="noopener"
+             title="Open this role's application on AfterQuery Experts (sign in there to submit)">${applied ? "Applied ↗" : "Apply ↗"}</a>
+          <a class="btn btn-open" href="${esc(job.jobUrl)}" target="_blank" rel="noopener"
+             title="Open the job description on AfterQuery Experts">Open ↗</a>
+        </div>`;
+    } else {
+      const canApply = Boolean(r?.ready) && !runningStep && !state.applyRun;
+      const applyLabel = app?.status === "submitted" ? "Re-apply" : "Apply";
+      const applyTitle = !r
+        ? "Select a resume first"
+        : !r.ready
+          ? `Fill in: ${r.missing.join(", ")}`
+          : app?.status === "submitted"
+            ? "Already submitted - click to submit again"
+            : `Apply to ${job.title}`;
+      actionCell = `
+        <div class="rowbtns">
+          <button class="btn btn-apply" data-apply ${canApply ? "" : "disabled"} title="${esc(applyTitle)}">${applyLabel}</button>
+          <a class="btn btn-open" href="${esc(job.jobUrl)}" target="_blank" rel="noopener" title="Open the posting on Ashby">Open ↗</a>
+        </div>`;
+    }
 
     tr.innerHTML = `
       <td>${scoreCell}</td>
@@ -407,6 +442,10 @@ function renderJobs() {
 
     tr.querySelector("[data-detail]").addEventListener("click", () => openDrawer(job, s, app));
     tr.querySelector("[data-apply]")?.addEventListener("click", () => applyOne(job));
+    tr.querySelector("[data-open-apply]")?.addEventListener("click", () => {
+      log(`opened Experts application: ${job.title}`);
+      toast("Opened the application on AfterQuery Experts — sign in there and submit.", "ok");
+    });
     tbody.append(tr);
   }
 }

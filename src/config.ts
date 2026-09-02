@@ -128,6 +128,13 @@ export const CONFIG = {
     /** Parallel LLM calls when scoring a resume against the whole board. */
     scoreConcurrency: num(process.env.AQ_SCORE_CONCURRENCY, 6),
     /**
+     * Per-1M-token USD rates for the cost ESTIMATE shown in the UI. Token counts
+     * are always exact; only the dollar figure uses these. Defaults are ballpark
+     * gpt-5 rates - override with AQ_PRICE_IN / AQ_PRICE_OUT when they change.
+     */
+    priceInPerM: Number(process.env.AQ_PRICE_IN ?? "1.25"),
+    priceOutPerM: Number(process.env.AQ_PRICE_OUT ?? "10"),
+    /**
      * How many roles get a real LLM assessment per resume.
      *
      * Both boards together are ~206 roles, so scoring every one with the model

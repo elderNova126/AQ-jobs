@@ -169,7 +169,11 @@ a:hover { text-decoration: underline; }
 
 .btn-ghost { background: transparent; }
 .btn-tiny { font-size: 11px; padding: 4px 8px; }
-.btn-apply { min-width: 74px; }
+.btn-apply { min-width: 62px; }
+.rowbtns { display: flex; gap: 6px; justify-content: flex-end; }
+.rowbtns .btn { padding: 6px 10px; font-size: 11px; }
+.btn-open { background: transparent; color: var(--text-dim); }
+.btn-open:hover { color: var(--accent); border-color: var(--accent-dim); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
 /* ---------------- dropzone ---------------- */
 
@@ -291,7 +295,7 @@ table.jobs tbody tr:hover { background: var(--surface-2); }
 .c-score { width: 86px; }
 .c-dept, .c-loc { width: 130px; }
 .c-status { width: 110px; }
-.c-act { width: 96px; }
+.c-act { width: 150px; }
 
 .role-title { font-weight: 500; }
 .role-title button {

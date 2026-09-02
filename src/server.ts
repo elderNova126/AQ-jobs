@@ -15,7 +15,7 @@ import {
 import { describeUserChrome } from "./experts/chrome.js";
 import { closeBrowser } from "./apply/browser.js";
 import { applyToMany, isReadyToApply, missingIdentityFields } from "./apply/engine.js";
-import { llmReady, llmStatus } from "./llm.js";
+import { llmReady, llmStatus, usageStats } from "./llm.js";
 import { extractResumeText, guessIdentity } from "./resume/extract.js";
 import { extractProfile } from "./resume/profile.js";
 import { scoreResumeAgainstAllJobs } from "./scoring.js";
@@ -248,6 +248,7 @@ app.get("/api/state", async (_req, res) => {
   res.json({
     llmReady: llm.ok,
     llmDetail: llm.detail,
+    usage: usageStats(),
     auth,
     /** What the "Use my Chrome" button can target. */
     chrome: describeUserChrome(),

@@ -115,6 +115,9 @@ async function askOpenai<T extends z.ZodType>(args: AskArgs<T>): Promise<z.infer
         "raise maxTokens if this repeats",
     );
   }
+  const u = res.usage;
+  if (u) recordUsage(u.input_tokens ?? 0, u.output_tokens ?? 0, u.input_tokens_details?.cached_tokens ?? 0);
+
   const parsed = res.output_parsed;
   if (parsed == null) {
     const refusal = findRefusal(res.output);
@@ -153,6 +156,15 @@ async function askAnthropic<T extends z.ZodType>(args: AskArgs<T>): Promise<z.in
     messages: [{ role: "user", content: args.user }],
   });
 
+  const u = res.usage;
+  if (u) {
+    recordUsage(
+      u.input_tokens ?? 0,
+      u.output_tokens ?? 0,
+      (u.cache_read_input_tokens ?? 0),
+    );
+  }
+
   if (res.stop_reason === "refusal") {
     throw new Error(`model declined (${res.stop_details?.category ?? "unspecified"})`);
   }
@@ -163,6 +175,61 @@ async function askAnthropic<T extends z.ZodType>(args: AskArgs<T>): Promise<z.in
 /* ---------------------------------------------------------------- *
  * Readiness
  * ---------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------- *
+ * Token usage accounting
+ * ---------------------------------------------------------------- */
+
+interface Usage {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Prompt tokens served from cache (billed cheaper). Best-effort. */
+  cachedInputTokens: number;
+}
+
+const usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+
+function recordUsage(input: number, output: number, cached = 0): void {
+  usage.calls += 1;
+  usage.inputTokens += input || 0;
+  usage.outputTokens += output || 0;
+  usage.cachedInputTokens += cached || 0;
+}
+
+/**
+ * Estimated spend so far.
+ *
+ * Token counts are exact (straight from each API response); the dollar figure
+ * is an estimate from per-million rates, since prices change and cached input is
+ * discounted. Override the rates with AQ_PRICE_IN / AQ_PRICE_OUT (USD per 1M).
+ */
+export function usageStats(): {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  totalTokens: number;
+  estCostUsd: number;
+  priced: boolean;
+} {
+  const inRate = CONFIG.llm.priceInPerM;
+  const outRate = CONFIG.llm.priceOutPerM;
+  const billedInput = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
+  const cost =
+    (billedInput / 1e6) * inRate +
+    (usage.cachedInputTokens / 1e6) * inRate * 0.25 + // cached input ~1/4 price
+    (usage.outputTokens / 1e6) * outRate;
+  return {
+    calls: usage.calls,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    totalTokens: usage.inputTokens + usage.outputTokens,
+    estCostUsd: Math.round(cost * 10000) / 10000,
+    priced: inRate > 0 || outRate > 0,
+  };
+}
 
 let probe: { ok: boolean; detail: string } | null = null;
 
